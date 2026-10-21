@@ -26,9 +26,9 @@ class Settings(BaseSettings):
     windows_cert_validation: str = "validate"
     log_level: str = "INFO"
     enable_api_docs: bool = True
-    dev_admin_password: str | None = None
-    dev_operator_password: str | None = None
-    dev_viewer_password: str | None = None
+    dev_admin_password: str="admin" | None = None
+    dev_operator_password: str ="operator"| None = None
+    dev_viewer_password: str ="viewer"| None = None
 
     model_config = SettingsConfigDict(
         env_file=".env",

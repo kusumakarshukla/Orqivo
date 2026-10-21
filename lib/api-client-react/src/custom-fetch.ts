@@ -349,6 +349,19 @@ export async function customFetch<T = unknown>(
     headers.set("accept", DEFAULT_JSON_ACCEPT);
   }
 
+  if (
+    typeof document !== "undefined" &&
+    !["GET", "HEAD", "OPTIONS"].includes(method)
+  ) {
+    const csrfCookie = document.cookie
+      .split("; ")
+      .find((cookie) => cookie.startsWith("wap_csrf="))
+      ?.slice("wap_csrf=".length);
+    if (csrfCookie && !headers.has("x-csrf-token")) {
+      headers.set("x-csrf-token", decodeURIComponent(csrfCookie));
+    }
+  }
+
   // Attach bearer token when an auth getter is configured and no
   // Authorization header has been explicitly provided.
   if (_authTokenGetter && !headers.has("authorization")) {

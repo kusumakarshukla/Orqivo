@@ -3,13 +3,18 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Windows Automation Portal API
 servers:
   - url: /api
     description: Base API path
 tags:
-  - name: health
-    description: Health operations
+  - { name: auth, description: Development authentication }
+  - { name: dashboard, description: Dashboard aggregates }
+  - { name: automations, description: Approved automation catalogue }
+  - { name: servers, description: Registered Windows servers }
+  - { name: jobs, description: Automation execution jobs }
+  - { name: audit, description: Append-only audit history }
+  - { name: health, description: Health operations }
 paths:
   /healthz:
     get:
@@ -24,13 +29,552 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /v1/auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Start a development session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginInput" }
+      responses:
+        "200":
+          description: Authenticated user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+  /v1/auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      responses:
+        "204": { description: Session ended }
+  /v1/auth/me:
+    get:
+      operationId: getCurrentUser
+      tags: [auth]
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+  /v1/dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      responses:
+        "200":
+          description: Job counts and worker state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DashboardSummary" }
+  /v1/dashboard/activity:
+    get:
+      operationId: getDashboardActivity
+      tags: [dashboard]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 10 } }
+      responses:
+        "200":
+          description: Recent jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Job" }
+  /v1/automations:
+    get:
+      operationId: listAutomations
+      tags: [automations]
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: risk, in: query, schema: { type: string } }
+        - { name: active, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: Approved automations
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Automation" }
+    post:
+      operationId: createAutomation
+      tags: [automations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutomationInput" }
+      responses:
+        "201":
+          description: Created automation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Automation" }
+  /v1/automations/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getAutomation
+      tags: [automations]
+      responses:
+        "200":
+          description: Automation definition
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Automation" }
+    put:
+      operationId: updateAutomation
+      tags: [automations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutomationInput" }
+      responses:
+        "200":
+          description: Updated automation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Automation" }
+    patch:
+      operationId: setAutomationStatus
+      tags: [automations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordStatusInput" }
+      responses:
+        "200":
+          description: Updated automation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Automation" }
+  /v1/servers:
+    get:
+      operationId: listServers
+      tags: [servers]
+      responses:
+        "200":
+          description: Registered servers
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Server" }
+    post:
+      operationId: createServer
+      tags: [servers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerInput" }
+      responses:
+        "201":
+          description: Created server
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+  /v1/servers/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getServer
+      tags: [servers]
+      responses:
+        "200":
+          description: Server record
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+    put:
+      operationId: updateServer
+      tags: [servers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerInput" }
+      responses:
+        "200":
+          description: Updated server
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+    patch:
+      operationId: setServerStatus
+      tags: [servers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecordStatusInput" }
+      responses:
+        "200":
+          description: Updated server
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+  /v1/servers/{id}/test-connection:
+    post:
+      operationId: testServerConnection
+      tags: [servers]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Simulated or real connection result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConnectionResult" }
+  /v1/jobs:
+    get:
+      operationId: listJobs
+      tags: [jobs]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: search, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: automation_id, in: query, schema: { type: string, format: uuid } }
+        - { name: server_id, in: query, schema: { type: string, format: uuid } }
+        - { name: user_id, in: query, schema: { type: string, format: uuid } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: sort, in: query, schema: { type: string, enum: [newest, oldest], default: newest } }
+      responses:
+        "200":
+          description: Paginated jobs
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobPage" }
+    post:
+      operationId: createJob
+      tags: [jobs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JobInput" }
+      responses:
+        "202":
+          description: Job queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+  /v1/jobs/export:
+    get:
+      operationId: exportJobs
+      tags: [jobs]
+      responses:
+        "200":
+          description: Sanitized CSV
+          content:
+            text/csv:
+              schema: { type: string }
+  /v1/jobs/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getJob
+      tags: [jobs]
+      responses:
+        "200":
+          description: Job detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+  /v1/jobs/{id}/events:
+    get:
+      operationId: getJobEvents
+      tags: [jobs]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Job timeline
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/JobEvent" }
+  /v1/jobs/{id}/cancel:
+    post:
+      operationId: cancelJob
+      tags: [jobs]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Cancellation requested
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+  /v1/jobs/{id}/retry:
+    post:
+      operationId: retryJob
+      tags: [jobs]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "202":
+          description: Retry queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+  /v1/jobs/{id}/log:
+    get:
+      operationId: downloadJobLog
+      tags: [jobs]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Sanitized job log
+          content:
+            text/plain:
+              schema: { type: string }
+  /v1/audit-logs:
+    get:
+      operationId: listAuditLogs
+      tags: [audit]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: search, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Paginated audit events
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditPage" }
 components:
   schemas:
     HealthStatus:
       type: object
+      required: [status]
       properties:
-        status:
-          type: string
-      required:
-        - status
+        status: { type: string }
+    Role:
+      type: string
+      enum: [admin, operator, viewer]
+    User:
+      type: object
+      required: [id, email, full_name, role, is_active]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        full_name: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        is_active: { type: boolean }
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 1 }
+    DashboardSummary:
+      type: object
+      required: [total, running, successful, failed, success_rate, mock_mode, worker_online, by_status]
+      properties:
+        total: { type: integer }
+        running: { type: integer }
+        successful: { type: integer }
+        failed: { type: integer }
+        success_rate: { type: number }
+        mock_mode: { type: boolean }
+        worker_online: { type: boolean }
+        by_status:
+          type: object
+          additionalProperties: { type: integer }
+    Automation:
+      type: object
+      required: [id, code, name, description, playbook_key, powershell_script_key, parameter_schema, risk_level, timeout_seconds, required_role, requires_change_number, requires_confirmation, is_active, target_os, expected_minutes]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        description: { type: string }
+        playbook_key: { type: string }
+        powershell_script_key: { type: string }
+        parameter_schema:
+          type: array
+          items: { $ref: "#/components/schemas/ParameterDefinition" }
+        risk_level: { type: string, enum: [low, medium, high] }
+        timeout_seconds: { type: integer }
+        required_role: { $ref: "#/components/schemas/Role" }
+        requires_change_number: { type: boolean }
+        requires_confirmation: { type: boolean }
+        is_active: { type: boolean }
+        target_os: { type: string }
+        expected_minutes: { type: integer }
+    ParameterDefinition:
+      type: object
+      required: [name, label, type, required]
+      properties:
+        name: { type: string }
+        label: { type: string }
+        type: { type: string, enum: [text, select, multi-select, number] }
+        required: { type: boolean }
+        options:
+          type: array
+          items: { type: string }
+        placeholder: { type: string }
+        sensitive: { type: boolean }
+        min: { type: number }
+        max: { type: number }
+    AutomationInput:
+      type: object
+      required: [code, name, description, playbook_key, powershell_script_key, parameter_schema, risk_level, timeout_seconds, required_role, requires_change_number, requires_confirmation, is_active]
+      properties:
+        code: { type: string }
+        name: { type: string }
+        description: { type: string }
+        playbook_key: { type: string }
+        powershell_script_key: { type: string }
+        parameter_schema:
+          type: array
+          items: { $ref: "#/components/schemas/ParameterDefinition" }
+        risk_level: { type: string, enum: [low, medium, high] }
+        timeout_seconds: { type: integer, minimum: 1, maximum: 3600 }
+        required_role: { $ref: "#/components/schemas/Role" }
+        requires_change_number: { type: boolean }
+        requires_confirmation: { type: boolean }
+        is_active: { type: boolean }
+    RecordStatusInput:
+      type: object
+      required: [is_active]
+      properties:
+        is_active: { type: boolean }
+    Server:
+      type: object
+      required: [id, name, display_name, hostname, environment, operating_system, winrm_port, use_https, certificate_validation, credential_reference, is_active, last_connection_status, last_connection_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        display_name: { type: string }
+        hostname: { type: string }
+        environment: { type: string }
+        operating_system: { type: string }
+        winrm_port: { type: integer }
+        use_https: { type: boolean }
+        certificate_validation: { type: string }
+        credential_reference: { type: string }
+        is_active: { type: boolean }
+        last_connection_status: { type: string }
+        last_connection_at: { type: ["string", "null"], format: date-time }
+    ServerInput:
+      type: object
+      required: [name, display_name, hostname, environment, operating_system, winrm_port, use_https, certificate_validation, credential_reference, is_active]
+      properties:
+        name: { type: string }
+        display_name: { type: string }
+        hostname: { type: string }
+        environment: { type: string }
+        operating_system: { type: string }
+        winrm_port: { type: integer, minimum: 1, maximum: 65535 }
+        use_https: { type: boolean }
+        certificate_validation: { type: string }
+        credential_reference: { type: string }
+        is_active: { type: boolean }
+    ConnectionResult:
+      type: object
+      required: [success, message, tested_at, mock]
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        tested_at: { type: string, format: date-time }
+        mock: { type: boolean }
+    Job:
+      type: object
+      required: [id, automation_id, automation_name, server_id, server_name, requested_by_user_id, requested_by, status, parameters, change_number, business_reason, submitted_at, started_at, completed_at, duration_seconds, sanitized_stdout, sanitized_stderr, ansible_return_code, error_summary, mock_result, cancellation_requested, events]
+      properties:
+        id: { type: string, format: uuid }
+        automation_id: { type: string, format: uuid }
+        automation_name: { type: string }
+        server_id: { type: string, format: uuid }
+        server_name: { type: string }
+        requested_by_user_id: { type: string, format: uuid }
+        requested_by: { type: string }
+        parent_job_id: { type: ["string", "null"], format: uuid }
+        status: { type: string, enum: [pending, validating, queued, running, successful, failed, cancelled, timed_out] }
+        parameters:
+          type: object
+          additionalProperties: true
+        change_number: { type: ["string", "null"] }
+        business_reason: { type: string }
+        submitted_at: { type: string, format: date-time }
+        started_at: { type: ["string", "null"], format: date-time }
+        completed_at: { type: ["string", "null"], format: date-time }
+        duration_seconds: { type: ["number", "null"] }
+        sanitized_stdout: { type: ["string", "null"] }
+        sanitized_stderr: { type: ["string", "null"] }
+        ansible_return_code: { type: ["integer", "null"] }
+        error_summary: { type: ["string", "null"] }
+        mock_result: { type: boolean }
+        cancellation_requested: { type: boolean }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/JobEvent" }
+    JobInput:
+      type: object
+      required: [automation_id, server_id, parameters, business_reason, confirmed]
+      properties:
+        automation_id: { type: string, format: uuid }
+        server_id: { type: string, format: uuid }
+        parameters:
+          type: object
+          additionalProperties: true
+        change_number: { type: string }
+        business_reason: { type: string, minLength: 3, maxLength: 1000 }
+        confirmed: { type: boolean, const: true }
+        simulate_failure: { type: boolean }
+    JobEvent:
+      type: object
+      required: [id, event_type, message, created_at]
+      properties:
+        id: { type: string }
+        event_type: { type: string }
+        message: { type: string }
+        created_at: { type: string, format: date-time }
+    JobPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Job" }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+    AuditEntry:
+      type: object
+      required: [id, user_id, user_name, action, resource_type, resource_id, details, created_at]
+      properties:
+        id: { type: string }
+        user_id: { type: ["string", "null"] }
+        user_name: { type: string }
+        action: { type: string }
+        resource_type: { type: string }
+        resource_id: { type: ["string", "null"] }
+        details:
+          type: object
+          additionalProperties: true
+        created_at: { type: string, format: date-time }
+    AuditPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AuditEntry" }
+        total: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
 

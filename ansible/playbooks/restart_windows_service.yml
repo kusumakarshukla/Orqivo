@@ -1,0 +1,39 @@
+---
+- name: Restart an approved Windows service
+  hosts: windows
+  gather_facts: false
+  vars:
+    allowed_service_names:
+      - Spooler
+      - W32Time
+      - Dnscache
+      - LanmanServer
+  tasks:
+    - name: Validate service and request metadata
+      ansible.builtin.assert:
+        that:
+          - service_name in allowed_service_names
+          - change_number is match('^[A-Za-z][A-Za-z0-9_-]{1,31}$')
+          - business_reason | length >= 3
+          - business_reason | length <= 1000
+        fail_msg: "The requested service operation is not approved."
+
+    - name: Run the registered PowerShell service script
+      ansible.windows.win_powershell:
+        path: C:\Automation\Restart-WindowsService.ps1
+        parameters:
+          ServiceName: "{{ service_name }}"
+          ChangeNumber: "{{ change_number }}"
+          BusinessReason: "{{ business_reason }}"
+      register: script_result
+      no_log: true
+      timeout: 240
+
+    - name: Fail when the PowerShell script reports an error
+      ansible.builtin.fail:
+        msg: "The approved service operation did not complete successfully."
+      when: script_result.rc | default(0) != 0
+
+    - name: Return sanitized PowerShell result
+      ansible.builtin.debug:
+        msg: "{{ script_result.output | default([]) }}"

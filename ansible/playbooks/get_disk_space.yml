@@ -1,0 +1,30 @@
+---
+- name: Read approved Windows disk space metrics
+  hosts: windows
+  gather_facts: false
+  tasks:
+    - name: Validate requested drive letters
+      ansible.builtin.assert:
+        that:
+          - drive_letters is sequence
+          - drive_letters | length > 0
+          - drive_letters | select('match', '^[A-Za-z]$') | list | length == drive_letters | length
+        fail_msg: "Drive letters must be a non-empty list of single letters."
+
+    - name: Run the registered PowerShell disk script
+      ansible.windows.win_powershell:
+        path: C:\Automation\Get-DiskSpace.ps1
+        parameters:
+          DriveLetters: "{{ drive_letters }}"
+      register: script_result
+      no_log: true
+      timeout: 120
+
+    - name: Fail when the PowerShell script reports an error
+      ansible.builtin.fail:
+        msg: "The approved disk-space check did not complete successfully."
+      when: script_result.rc | default(0) != 0
+
+    - name: Return structured disk metrics
+      ansible.builtin.debug:
+        msg: "{{ script_result.output | default([]) }}"

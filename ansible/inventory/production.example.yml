@@ -1,0 +1,15 @@
+# Add only approved Windows targets. The application generates a temporary,
+# one-host inventory for each job and does not accept inventory paths from users.
+all:
+  children:
+    windows:
+      hosts:
+        win-server-01:
+          ansible_host: win-server-01.internal.example
+          ansible_connection: winrm
+          ansible_port: 5986
+          ansible_winrm_scheme: https
+          ansible_winrm_transport: ntlm
+          ansible_winrm_server_cert_validation: validate
+          ansible_user: "{{ lookup('env', 'WINDOWS_USERNAME') }}"
+          ansible_password: "{{ lookup('env', 'WINDOWS_PASSWORD') }}"

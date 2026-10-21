@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Windows Automation Portal"
+description = "A secure operations portal for approved Windows automation: operators submit parameterized jobs, users track status and sanitized history, and administrators manage servers and allowlisted automations. Development runs in mock mode; production automation runs through Ansible from the Linux automation host."
+version = "1.0.0"
+id = "artifacts/windows-automation-portal"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21998
+
+[services.development]
+run = "pnpm --filter @workspace/windows-automation-portal run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/windows-automation-portal", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/windows-automation-portal/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21998"
+BASE_PATH = "/"

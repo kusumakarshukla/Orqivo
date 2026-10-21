@@ -1,0 +1,1160 @@
+Build a complete, production-oriented full-stack web application called:
+
+"Windows Automation Portal"
+
+PURPOSE
+=======
+
+I have:
+
+1. One Linux server that will run Ansible.
+2. One Windows Server where existing PowerShell scripts are stored.
+3. Users need a web UI where they can:
+   - Choose an approved automation.
+   - Enter the required parameters.
+   - Submit the request.
+   - Track execution status.
+   - View sanitized results.
+   - View previous execution history.
+4. The backend must validate the request and execute an approved Ansible playbook.
+5. Ansible must connect from the Linux server to the Windows Server using WinRM over HTTPS.
+6. The Ansible playbook must call a predefined PowerShell script located on the Windows Server.
+7. Every automation run must be recorded in a PostgreSQL database.
+
+IMPORTANT EXECUTION ENVIRONMENT
+===============================
+
+The application may be developed and previewed in Replit, but production Ansible execution will happen on my Linux automation server.
+
+The project must therefore support two execution modes:
+
+1. MOCK_MODE=true
+   - Used in Replit and local development.
+   - Must simulate Ansible and PowerShell execution.
+   - Must not require access to a real Windows Server.
+   - Must simulate pending, running, successful, failed, and timed-out jobs.
+   - The complete UI, API, database, job status, logs, and history must work in mock mode.
+
+2. MOCK_MODE=false
+   - Used on the Linux automation server.
+   - Must execute real Ansible playbooks.
+   - Must connect to the Windows Server through WinRM over HTTPS.
+   - Must run approved PowerShell scripts.
+   - Must capture Ansible output, status, timing, and sanitized errors.
+
+Do not claim to have tested real WinRM connectivity from Replit. Clearly explain that real execution must be tested from the Linux server, where the Windows Server is network-accessible.
+
+TECHNOLOGY STACK
+================
+
+Use the following technologies:
+
+Frontend:
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+- React Router
+- TanStack Query
+- React Hook Form
+- Zod validation
+- Lucide icons
+
+Backend:
+- Python 3.12
+- FastAPI
+- Pydantic
+- SQLAlchemy 2.x
+- Alembic
+- PostgreSQL
+- Uvicorn
+- Structured Python logging
+
+Automation:
+- Ansible Core
+- ansible.windows collection
+- pywinrm
+- YAML playbooks
+- WinRM over HTTPS on port 5986
+
+Testing:
+- Pytest for backend tests
+- Vitest and React Testing Library for frontend tests
+- A basic end-to-end smoke test
+- Mock Ansible runner tests
+
+Deployment:
+- Dockerfiles
+- Docker Compose
+- systemd service example
+- Nginx reverse proxy configuration
+- Environment-variable configuration
+- Replit development configuration
+- Linux production deployment instructions
+
+PROJECT STRUCTURE
+=================
+
+Create a clean monorepo structure similar to:
+
+/
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   ├── pages/
+│   │   ├── hooks/
+│   │   ├── services/
+│   │   ├── schemas/
+│   │   ├── types/
+│   │   └── utils/
+│   ├── tests/
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── tsconfig.json
+│
+├── backend/
+│   ├── app/
+│   │   ├── api/
+│   │   ├── core/
+│   │   ├── db/
+│   │   ├── models/
+│   │   ├── schemas/
+│   │   ├── services/
+│   │   ├── repositories/
+│   │   ├── security/
+│   │   └── main.py
+│   ├── tests/
+│   ├── alembic/
+│   ├── alembic.ini
+│   └── requirements.txt
+│
+├── ansible/
+│   ├── ansible.cfg
+│   ├── inventory/
+│   │   ├── development.yml
+│   │   └── production.example.yml
+│   ├── playbooks/
+│   ├── roles/
+│   ├── group_vars/
+│   └── collections/
+│       └── requirements.yml
+│
+├── powershell/
+│   ├── Restart-WindowsService.ps1
+│   ├── Get-ServerHealth.ps1
+│   └── Get-DiskSpace.ps1
+│
+├── scripts/
+│   ├── setup_linux.sh
+│   ├── install_ansible.sh
+│   ├── initialize_database.sh
+│   ├── run_development.sh
+│   ├── run_production.sh
+│   └── verify_setup.sh
+│
+├── deployment/
+│   ├── nginx/
+│   ├── systemd/
+│   └── docker/
+│
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── API.md
+│   ├── DATABASE.md
+│   ├── ANSIBLE_SETUP.md
+│   ├── WINDOWS_SETUP.md
+│   ├── DEPLOYMENT.md
+│   ├── SECURITY.md
+│   ├── TROUBLESHOOTING.md
+│   └── USER_GUIDE.md
+│
+├── docker-compose.yml
+├── .env.example
+├── .gitignore
+├── Makefile
+├── README.md
+└── replit.md
+
+Do not create empty placeholder files. Every generated file must contain usable implementation or meaningful documentation.
+
+APPLICATION PAGES
+=================
+
+Create the following polished, responsive pages.
+
+1. Login page
+   - Development login only for the initial application.
+   - Three seeded development users:
+     - admin@example.com
+     - operator@example.com
+     - viewer@example.com
+   - Clearly display that these are development accounts.
+   - Structure authentication so Microsoft Entra ID can be added later.
+   - Do not implement fake Entra ID authentication.
+
+2. Dashboard
+   - Total jobs
+   - Running jobs
+   - Successful jobs
+   - Failed jobs
+   - Success rate
+   - Recent execution activity
+   - Jobs grouped by status
+   - A clear "Run Automation" button
+   - Server connectivity status
+   - Mock Mode indicator when MOCK_MODE=true
+
+3. Automation Catalogue
+   - Display approved automation cards.
+   - Each card must show:
+     - Automation name
+     - Description
+     - Risk level
+     - Expected execution time
+     - Required role
+     - Target operating system
+     - Active or inactive status
+   - Include search and filters.
+   - Include a button to open the execution form.
+
+4. Run Automation
+   - Automation selection
+   - Target-server selection
+   - Dynamic parameter form based on the automation definition
+   - Change or incident number
+   - Business reason
+   - Confirmation checkbox
+   - Validation messages
+   - Review-before-submit section
+   - High-risk warning when appropriate
+   - Prevent duplicate submissions
+
+5. Job Details
+   - Job ID
+   - Automation
+   - Requested by
+   - Target server
+   - Submitted parameters with sensitive values masked
+   - Status
+   - Progress indicator
+   - Start and finish timestamps
+   - Duration
+   - Sanitized stdout
+   - Sanitized stderr
+   - Ansible return code
+   - PowerShell result
+   - Timeline:
+     - Submitted
+     - Validated
+     - Started
+     - Connected
+     - Script executed
+     - Completed or failed
+   - Cancel button only when cancellation is possible
+   - Retry button for authorized users
+   - Download sanitized log button
+
+6. Job History
+   - Paginated job table
+   - Search
+   - Status filter
+   - Automation filter
+   - User filter
+   - Target-server filter
+   - Date range filter
+   - Sort by newest or oldest
+   - Open job-details action
+   - CSV export of sanitized fields only
+
+7. Server Management
+   - Admin-only page
+   - List registered servers
+   - Hostname
+   - Display name
+   - Environment
+   - Operating system
+   - WinRM port
+   - Active status
+   - Last successful connection
+   - Add, edit, activate, and deactivate server records
+   - Never display or store plain-text passwords
+   - Test Connection action
+   - In mock mode, simulate the connection test
+
+8. Automation Administration
+   - Admin-only page
+   - Add, edit, activate, and deactivate automation definitions
+   - Do not allow arbitrary commands through this page
+   - Automation records may point only to predefined allowlisted playbooks
+   - Script and playbook paths must be validated against an internal registry
+   - Manage dynamic parameter definitions
+
+9. Audit Log
+   - Admin-only page
+   - Display login, job submission, job retry, cancellation, configuration change, and connection-test events
+   - Search and filters
+   - Audit records must be append-only through the application
+
+10. Profile and Settings
+   - Logged-in user details
+   - Role
+   - Theme selection
+   - Log out
+
+UI AND DESIGN REQUIREMENTS
+==========================
+
+Create a simple, elegant enterprise UI.
+
+Design guidance:
+- Light background
+- White cards
+- Dark navy text
+- Blue as the primary accent
+- Green for success
+- Amber for warnings
+- Red only for failures and destructive actions
+- Minimal use of gradients
+- Clear spacing
+- Responsive desktop and mobile layout
+- Collapsible sidebar
+- Accessible keyboard navigation
+- Visible focus states
+- WCAG-conscious contrast
+- Loading skeletons
+- Empty states
+- Confirmation dialogs
+- Toast notifications
+- Error boundaries
+- No excessive animations
+- Do not use unnecessarily bright or excessive colors
+
+DATABASE REQUIREMENTS
+=====================
+
+Use PostgreSQL with SQLAlchemy and Alembic.
+
+Create database models, migrations, relationships, indexes, constraints, and seed data for:
+
+1. users
+   - id as UUID
+   - email
+   - full_name
+   - password_hash for development authentication
+   - role_id
+   - is_active
+   - created_at
+   - updated_at
+   - last_login_at
+
+2. roles
+   - id
+   - name
+   - description
+   - permissions as JSON or normalized permissions
+   - created_at
+
+Required roles:
+- admin
+- operator
+- viewer
+
+3. servers
+   - id as UUID
+   - name
+   - display_name
+   - hostname or IP
+   - environment
+   - operating_system
+   - winrm_port
+   - use_https
+   - certificate_validation
+   - credential_reference
+   - is_active
+   - last_connection_status
+   - last_connection_at
+   - created_at
+   - updated_at
+
+The credential_reference field must contain only the name or key used to locate a secret from environment variables or a secret manager. It must never contain the actual password.
+
+4. automation_definitions
+   - id as UUID
+   - code
+   - name
+   - description
+   - playbook_key
+   - powershell_script_key
+   - parameter_schema as JSON
+   - risk_level
+   - timeout_seconds
+   - required_role
+   - requires_change_number
+   - requires_confirmation
+   - is_active
+   - created_at
+   - updated_at
+
+5. jobs
+   - id as UUID
+   - automation_definition_id
+   - server_id
+   - requested_by_user_id
+   - parent_job_id for retries
+   - status
+   - parameters_json
+   - change_number
+   - business_reason
+   - ansible_return_code
+   - sanitized_stdout
+   - sanitized_stderr
+   - submitted_at
+   - started_at
+   - completed_at
+   - duration_seconds
+   - error_summary
+   - cancellation_requested
+   - created_at
+   - updated_at
+
+Job statuses:
+- pending
+- validating
+- queued
+- running
+- successful
+- failed
+- cancelled
+- timed_out
+
+6. job_events
+   - id
+   - job_id
+   - event_type
+   - message
+   - sanitized_details_json
+   - created_at
+
+7. audit_logs
+   - id
+   - user_id
+   - action
+   - resource_type
+   - resource_id
+   - sanitized_details_json
+   - source_ip
+   - created_at
+
+8. application_settings
+   - id
+   - key
+   - value_json
+   - description
+   - updated_at
+   - updated_by_user_id
+
+Add useful indexes for:
+- Job status
+- Submitted date
+- Requested user
+- Server
+- Automation
+- Audit timestamp
+- Audit action
+
+Implement:
+- Initial Alembic migration
+- Seed script
+- Database initialization script
+- Database health check
+- Transaction handling
+- Repository layer
+- No raw SQL string concatenation
+
+SEED DATA
+=========
+
+Create seed data for:
+
+Users:
+- Admin User
+- Operator User
+- Viewer User
+
+Development passwords may be documented in README but must be clearly labeled as development-only and must be changeable through environment variables.
+
+Servers:
+- win-server-01
+- win-server-02
+
+Mark them as mock or development servers in seed data.
+
+Automation definitions:
+1. Restart Windows Service
+2. Get Windows Server Health
+3. Get Disk Space
+
+Provide appropriate parameter schemas for each automation.
+
+BACKEND API
+===========
+
+Implement versioned REST APIs under:
+
+/api/v1
+
+Required endpoints:
+
+Authentication:
+- POST /api/v1/auth/login
+- POST /api/v1/auth/logout
+- GET /api/v1/auth/me
+
+Dashboard:
+- GET /api/v1/dashboard/summary
+- GET /api/v1/dashboard/activity
+
+Automations:
+- GET /api/v1/automations
+- GET /api/v1/automations/{id}
+- POST /api/v1/automations
+- PUT /api/v1/automations/{id}
+- PATCH /api/v1/automations/{id}/status
+
+Servers:
+- GET /api/v1/servers
+- GET /api/v1/servers/{id}
+- POST /api/v1/servers
+- PUT /api/v1/servers/{id}
+- PATCH /api/v1/servers/{id}/status
+- POST /api/v1/servers/{id}/test-connection
+
+Jobs:
+- POST /api/v1/jobs
+- GET /api/v1/jobs
+- GET /api/v1/jobs/{id}
+- GET /api/v1/jobs/{id}/events
+- POST /api/v1/jobs/{id}/cancel
+- POST /api/v1/jobs/{id}/retry
+- GET /api/v1/jobs/{id}/log
+- GET /api/v1/jobs/export
+
+Audit:
+- GET /api/v1/audit-logs
+
+Health:
+- GET /health
+- GET /ready
+
+Use consistent JSON response models and implement:
+- Validation errors
+- Authentication errors
+- Authorization errors
+- Not-found errors
+- Conflict errors
+- Job execution errors
+- Unexpected server errors
+- Correlation IDs
+- Request logging
+- Pagination
+- Filtering
+- Sorting
+
+Do not expose stack traces, credentials, environment variables, command strings containing secrets, or internal filesystem details to the frontend.
+
+AUTHENTICATION AND AUTHORIZATION
+================================
+
+Implement secure development authentication.
+
+Requirements:
+- Hash passwords securely.
+- Use HTTP-only cookies or another secure server-side approach.
+- Do not store access tokens in browser localStorage.
+- Add CSRF protection if cookies are used.
+- Add role-based authorization.
+
+Permissions:
+
+Viewer:
+- View dashboard
+- View catalogue
+- View permitted job history
+- View job details
+
+Operator:
+- All viewer permissions
+- Submit approved automation jobs
+- Retry permitted jobs
+- Download sanitized job logs
+
+Admin:
+- All operator permissions
+- Manage servers
+- Manage automation definitions
+- Test connections
+- View audit logs
+- Activate and deactivate records
+
+Include an authentication abstraction or adapter so Microsoft Entra ID OIDC can replace development authentication later.
+
+Do not fabricate a working Entra ID integration without tenant ID, client ID, client secret or certificate, redirect URI, and authorization configuration.
+
+ANSIBLE REQUIREMENTS
+====================
+
+Create fully usable Ansible files.
+
+Use:
+- ansible.windows.win_ping
+- ansible.windows.win_powershell
+- WinRM over HTTPS
+- Port 5986 by default
+- Certificate validation controlled by environment-specific inventory
+- no_log for credential-related tasks
+- Explicit timeouts
+- Input assertions
+- Registered output
+- Structured result handling
+
+Create these playbooks:
+
+1. test_windows_connection.yml
+   - Run win_ping
+   - Return a structured connection result
+
+2. restart_windows_service.yml
+   Inputs:
+   - target_host
+   - service_name
+   - change_number
+   - business_reason
+
+   Requirements:
+   - Validate the service name against an allowlist.
+   - Call C:\Automation\Restart-WindowsService.ps1.
+   - Return JSON-compatible output.
+   - Fail clearly on non-zero PowerShell results.
+
+3. get_server_health.yml
+   Inputs:
+   - target_host
+
+   Requirements:
+   - Call C:\Automation\Get-ServerHealth.ps1.
+   - Return CPU, memory, operating-system, uptime, and service-health information.
+
+4. get_disk_space.yml
+   Inputs:
+   - target_host
+   - drive_letters
+
+   Requirements:
+   - Call C:\Automation\Get-DiskSpace.ps1.
+   - Validate drive letters.
+   - Return total, used, free, and free-percent values.
+
+Use a backend registry such as:
+
+PLAYBOOK_REGISTRY = {
+    "restart_windows_service": "...approved path...",
+    "get_server_health": "...approved path...",
+    "get_disk_space": "...approved path..."
+}
+
+The API must accept an automation identifier, not a raw playbook path.
+
+Never allow users to:
+- Submit raw Ansible commands
+- Submit raw PowerShell commands
+- Choose arbitrary playbook paths
+- Choose arbitrary script paths
+- Supply inventory file paths
+- Supply vault file paths
+- Supply shell arguments
+- Supply unrestricted extra variables
+
+Use subprocess safely:
+- Pass the command as an argument list.
+- Never use shell=True.
+- Apply a timeout.
+- Use a controlled working directory.
+- Use a minimal environment.
+- Capture stdout and stderr.
+- Sanitize output before database storage and frontend display.
+
+When passing extra variables, write validated variables to a temporary JSON file with restricted permissions instead of building shell command strings. Delete the temporary file after execution.
+
+Ensure only one allowlisted target host is selected through the Ansible limit option or another safe host-selection mechanism.
+
+POWERSHELL REQUIREMENTS
+=======================
+
+Create these PowerShell example scripts:
+
+1. Restart-WindowsService.ps1
+2. Get-ServerHealth.ps1
+3. Get-DiskSpace.ps1
+
+Each PowerShell script must:
+- Use an explicit param() block.
+- Use validation attributes.
+- Set $ErrorActionPreference = "Stop".
+- Be non-interactive.
+- Return structured JSON.
+- Return exit code 0 on success.
+- Return non-zero on failure.
+- Avoid plain-text credential handling.
+- Avoid arbitrary Invoke-Expression.
+- Avoid accepting script paths or commands.
+- Produce clear, sanitized errors.
+- Include comment-based help.
+- Work in Windows PowerShell 5.1 where possible.
+
+For Restart-WindowsService.ps1:
+- Use an allowlist of service names.
+- Check the initial service status.
+- Restart or start the approved service.
+- Wait for the expected final state.
+- Return before and after statuses.
+
+For Get-ServerHealth.ps1:
+- Use CIM cmdlets.
+- Return hostname, OS, uptime, CPU, memory, and selected important services.
+- Do not change the server.
+
+For Get-DiskSpace.ps1:
+- Validate drive-letter format.
+- Return disk metrics.
+- Do not change the server.
+
+JOB EXECUTION DESIGN
+====================
+
+Do not keep a long-running Ansible subprocess inside a normal HTTP request.
+
+Implement an internal background job runner suitable for the initial version:
+- Job submission immediately creates a database job record.
+- API returns HTTP 202 with the job ID.
+- Background worker picks up pending jobs.
+- Worker updates status and job events.
+- Frontend polls job status and events.
+- Apply configurable concurrency limit.
+- Apply job timeout.
+- Recover jobs that were left running after application restart by marking them failed or re-queueing according to a documented policy.
+- Use database-backed locking so the same job is not executed twice.
+- Add graceful shutdown logic.
+
+Create the worker as a separate process or command, for example:
+- python -m app.worker
+
+Docker Compose and production instructions must run the API and worker separately.
+
+MOCK EXECUTION ENGINE
+=====================
+
+When MOCK_MODE=true:
+- Do not execute ansible-playbook.
+- Simulate realistic processing stages.
+- Save job events in the database.
+- Simulate 2 to 8 seconds of execution.
+- Produce realistic structured results.
+- Support configurable failure simulation.
+- Provide a development-only UI option to simulate failure.
+- Clearly label simulated results as mock results.
+- Never show the mock-failure option when MOCK_MODE=false.
+
+SECURITY REQUIREMENTS
+=====================
+
+Implement the following controls:
+
+- No credentials in source code.
+- No credentials committed to Git.
+- No secrets in frontend JavaScript.
+- No raw password storage.
+- No arbitrary command execution.
+- No shell=True.
+- No unrestricted host input.
+- No unrestricted path input.
+- No secrets in logs.
+- No secrets in API responses.
+- Mask fields whose names contain:
+  - password
+  - secret
+  - token
+  - credential
+  - authorization
+  - key
+- Redact common Ansible password patterns.
+- Validate all frontend and backend inputs.
+- Add secure headers.
+- Add CORS configuration.
+- Add request size limits.
+- Add basic login and job-submission rate limits.
+- Add correlation IDs.
+- Add audit entries for sensitive actions.
+- Add environment-aware debug settings.
+- Production mode must not expose API documentation publicly unless explicitly enabled.
+- Admin changes must create before-and-after audit records with secrets removed.
+- CSV export must prevent spreadsheet formula injection by escaping dangerous leading characters.
+
+Never place a real Windows password in:
+- Inventory files
+- Source code
+- Docker Compose
+- README
+- Database seed data
+- Logs
+- Screenshots
+- API examples
+
+Use environment variables or secret references.
+
+ENVIRONMENT VARIABLES
+=====================
+
+Create a complete .env.example including, at minimum:
+
+APP_ENV=development
+APP_NAME=Windows Automation Portal
+APP_HOST=0.0.0.0
+APP_PORT=8000
+FRONTEND_URL=http://localhost:5173
+DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/windows_automation
+SESSION_SECRET=
+CSRF_SECRET=
+MOCK_MODE=true
+MOCK_FAILURE_RATE=0
+ANSIBLE_ENABLED=false
+ANSIBLE_BINARY=/usr/bin/ansible-playbook
+ANSIBLE_CONFIG=/opt/windows-automation/ansible/ansible.cfg
+ANSIBLE_WORKING_DIRECTORY=/opt/windows-automation/ansible
+ANSIBLE_JOB_TIMEOUT_SECONDS=600
+MAX_CONCURRENT_JOBS=2
+WINDOWS_USERNAME=
+WINDOWS_PASSWORD=
+WINDOWS_WINRM_PORT=5986
+WINDOWS_WINRM_TRANSPORT=ntlm
+WINDOWS_CERT_VALIDATION=validate
+LOG_LEVEL=INFO
+ENABLE_API_DOCS=true
+DEV_ADMIN_PASSWORD=
+DEV_OPERATOR_PASSWORD=
+DEV_VIEWER_PASSWORD=
+
+The actual application must fail safely when required production secrets are missing.
+
+REPLIT REQUIREMENTS
+===================
+
+Configure the project so it can be previewed in Replit using MOCK_MODE=true.
+
+Requirements:
+- Use Replit-compatible environment variables.
+- Provide a Replit run configuration.
+- Start PostgreSQL through the most appropriate Replit-supported option available in the workspace or clearly support an externally supplied DATABASE_URL.
+- If a Replit-managed database is available, use its environment-provided connection string.
+- Never hardcode a Replit database URL.
+- Run database migrations automatically only in development or through an explicit setup command.
+- Start the frontend, backend, and worker for development.
+- Make preview URLs work correctly.
+- Keep production configuration separate from Replit development configuration.
+
+TESTING REQUIREMENTS
+====================
+
+Create and run meaningful tests.
+
+Backend tests:
+- Authentication
+- Role authorization
+- Automation listing
+- Server listing
+- Valid job submission
+- Invalid parameter rejection
+- Viewer cannot submit a job
+- Operator cannot manage servers
+- Admin can manage servers
+- Mock job succeeds
+- Mock job fails
+- Duplicate execution prevention
+- Output sanitization
+- CSV formula injection prevention
+- Audit record creation
+- Health and readiness endpoints
+
+Frontend tests:
+- Login page renders
+- Dashboard renders
+- Automation catalogue renders
+- Dynamic parameter form validates inputs
+- Job submission works with mocked API
+- Job details displays progress and output
+- Role-based navigation hiding
+- Error state
+- Empty state
+
+Ansible validation:
+- Run ansible-playbook --syntax-check for every playbook if Ansible is available.
+- Validate YAML.
+- Do not fail the Replit development build merely because real WinRM is unavailable.
+
+PowerShell validation:
+- Check files for expected param blocks and forbidden Invoke-Expression usage.
+- If PowerShell is unavailable in Replit, document real Windows validation steps.
+
+Code quality:
+- Python formatting and linting
+- TypeScript linting
+- Type checking
+- No obvious dead code
+- No placeholder TODOs for core functionality
+
+DOCUMENTATION REQUIREMENTS
+==========================
+
+Create a comprehensive README.md with these exact major sections:
+
+1. Project overview
+2. Architecture
+3. Features
+4. Technology stack
+5. Project structure
+6. Quick start in Replit
+7. Local development setup
+8. PostgreSQL setup
+9. Linux Ansible server setup
+10. Windows Server WinRM setup
+11. PowerShell script deployment
+12. Environment variables
+13. Database migrations
+14. Running in mock mode
+15. Running with real Ansible
+16. Running tests
+17. Production deployment
+18. Nginx configuration
+19. systemd services
+20. Docker deployment
+21. Security checklist
+22. Troubleshooting
+23. Known limitations
+24. Production hardening recommendations
+
+Create WINDOWS_SETUP.md with exact PowerShell commands for:
+- Enabling PowerShell remoting
+- Checking WinRM listeners
+- Creating an HTTPS WinRM listener
+- Opening TCP 5986 only from the Linux server IP
+- Testing Test-WSMan
+- Creating C:\Automation
+- Setting NTFS permissions
+- Copying the provided PowerShell scripts
+- Testing each PowerShell script locally
+- Guidance for internal-CA certificates
+- Certificate thumbprint verification
+- Removing insecure HTTP listeners if approved by the organization
+- A warning not to blindly run production commands without security review
+
+Create ANSIBLE_SETUP.md with exact Linux commands for:
+- Creating a Python virtual environment
+- Installing Ansible, pywinrm, and dependencies
+- Installing ansible.windows
+- Configuring inventory
+- Configuring credentials through environment variables or a vault
+- Running win_ping
+- Running syntax checks
+- Running each playbook manually
+- Testing real execution safely
+
+Create DEPLOYMENT.md with:
+- Deployment using Python virtual environment
+- Building the React frontend
+- Serving frontend files
+- Running FastAPI
+- Running the worker
+- Nginx reverse proxy
+- API systemd service
+- Worker systemd service
+- PostgreSQL configuration
+- Firewall requirements
+- Log locations
+- Backup considerations
+- Upgrade and rollback instructions
+
+Create TROUBLESHOOTING.md covering:
+- WinRM connection refused
+- WinRM certificate validation failure
+- Authentication failure
+- NTLM or Kerberos issues
+- ansible.windows collection missing
+- pywinrm missing
+- PowerShell execution-policy problems
+- Script path not found
+- Permission denied
+- Job stuck in running
+- Database connection failure
+- Migration failure
+- Frontend cannot reach API
+- CORS errors
+- Nginx 502
+- systemd service failure
+
+Create ARCHITECTURE.md with:
+- Component responsibilities
+- Request and execution flow
+- Security boundaries
+- Database relationships
+- Mock mode versus production mode
+- Explanation of why the browser never communicates directly with Ansible or Windows
+- Mermaid architecture diagram
+- Mermaid sequence diagram
+
+DEPLOYMENT FILES
+================
+
+Create:
+
+1. Backend Dockerfile
+2. Frontend Dockerfile if using separate frontend serving
+3. docker-compose.yml with:
+   - PostgreSQL
+   - Backend API
+   - Background worker
+   - Frontend or Nginx
+4. Nginx configuration
+5. systemd API service
+6. systemd worker service
+7. Makefile with useful commands:
+   - make setup
+   - make dev
+   - make migrate
+   - make seed
+   - make test
+   - make lint
+   - make ansible-check
+   - make docker-up
+   - make docker-down
+8. Shell scripts for setup and verification
+
+HEALTH AND OBSERVABILITY
+========================
+
+Implement:
+- /health for application process health
+- /ready for database and worker readiness
+- Structured logs
+- Correlation IDs
+- Job IDs in logs
+- No sensitive information in logs
+- Worker heartbeat stored in the database or another simple method
+- Dashboard warning when the worker is unavailable
+- Dashboard warning when MOCK_MODE=true
+- Configurable log level
+
+ACCEPTANCE CRITERIA
+===================
+
+The project is complete only if all of these are true:
+
+1. The application starts successfully in Replit using MOCK_MODE=true.
+2. The login page works with seeded development users.
+3. Role-based access works.
+4. The dashboard loads real data from PostgreSQL.
+5. Automation definitions load from the database.
+6. Dynamic forms are generated from parameter_schema.
+7. A user can submit a mock automation.
+8. The API immediately returns a job ID.
+9. The background worker processes the job.
+10. The UI shows live job status through polling.
+11. Job history is saved.
+12. Job events are saved.
+13. Audit events are saved.
+14. Output is sanitized.
+15. Admin pages work.
+16. Database migrations and seed scripts work.
+17. Backend tests pass.
+18. Frontend tests pass.
+19. Ansible YAML and playbooks pass available syntax validation.
+20. Docker Compose files are valid.
+21. README includes exact run instructions.
+22. Real Ansible mode is implemented, not merely described.
+23. No credentials or secrets are hardcoded.
+24. No core file contains placeholder text such as TODO, implement later, or coming soon.
+25. Errors are handled with useful, safe messages.
+26. The UI is polished, responsive, and usable.
+
+IMPLEMENTATION PROCESS
+======================
+
+Follow this process without waiting for additional confirmation:
+
+1. Inspect the workspace and available Replit services.
+2. Create a detailed internal implementation plan.
+3. Build the database models and migrations.
+4. Build backend services and APIs.
+5. Build the background job worker.
+6. Build mock execution.
+7. Build real Ansible execution.
+8. Create playbooks.
+9. Create PowerShell scripts.
+10. Build the React UI.
+11. Connect the frontend to the backend.
+12. Add authentication and authorization.
+13. Add audit logging and sanitization.
+14. Add tests.
+15. Run database migrations.
+16. Seed development data.
+17. Start the application in mock mode.
+18. Test the application through the browser.
+19. Fix all build, runtime, migration, API, and UI errors discovered.
+20. Run automated tests.
+21. Run linting and type checking.
+22. Run available Ansible syntax checks.
+23. Generate all deployment configurations.
+24. Generate all documentation.
+25. Run a final verification.
+
+If a dependency or Replit feature is unavailable:
+- Use a safe, compatible alternative.
+- Document the substitution.
+- Do not remove the required functionality.
+- Do not silently skip important features.
+
+Do not stop after generating scaffolding.
+Do not only provide code snippets in chat.
+Create all project files in the workspace.
+Run the project.
+Test the project.
+Fix discovered errors.
+
+FINAL RESPONSE FORMAT
+=====================
+
+When the complete project is built, provide a final response containing:
+
+1. Build summary
+2. Features implemented
+3. Final project structure
+4. Tests executed and their results
+5. Exact commands to run in Replit
+6. Exact commands to run locally
+7. Exact commands to deploy on the Linux server
+8. Exact Windows Server preparation steps
+9. Environment variables and Replit Secrets I need to configure
+10. Default development login accounts
+11. How to switch from MOCK_MODE=true to MOCK_MODE=false
+12. How to test Ansible connectivity
+13. How to run each playbook manually
+14. How to verify a completed job
+15. Security warnings
+16. Known limitations
+17. File paths for all important configuration files
+18. A final production-readiness checklist
+
+Do not include real passwords in the final response.
+Do not say the application is production-ready unless all tests pass.
+Clearly distinguish:
+- What was actually tested in Replit
+- What was simulated
+- What still requires testing on the Linux and Windows servers

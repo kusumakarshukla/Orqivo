@@ -25,8 +25,11 @@ app.use(
     },
   }),
 );
-app.use(cors());
-app.use(express.json());
+const allowedOrigin = process.env.FRONTEND_URL;
+if (allowedOrigin) {
+  app.use(cors({ origin: allowedOrigin, credentials: true }));
+}
+app.use(express.json({ limit: "32kb" }));
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", router);

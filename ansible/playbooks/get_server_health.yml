@@ -1,0 +1,20 @@
+---
+- name: Read Windows server health
+  hosts: windows
+  gather_facts: false
+  tasks:
+    - name: Run the registered PowerShell health script
+      ansible.windows.win_powershell:
+        path: C:\Automation\Get-ServerHealth.ps1
+      register: script_result
+      no_log: true
+      timeout: 120
+
+    - name: Fail when the PowerShell script reports an error
+      ansible.builtin.fail:
+        msg: "The approved health check did not complete successfully."
+      when: script_result.rc | default(0) != 0
+
+    - name: Return structured health result
+      ansible.builtin.debug:
+        msg: "{{ script_result.output | default([]) }}"

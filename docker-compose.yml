@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the protected .env file}
+      POSTGRES_DB: ${POSTGRES_DB:-windows_automation}
+    volumes:
+      - portal-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+    networks: [portal-internal]
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APP_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in the protected .env file}
+      MOCK_MODE: ${MOCK_MODE:-true}
+      ANSIBLE_CONFIG: /opt/windows-automation/ansible/ansible.cfg
+      ANSIBLE_WORKING_DIRECTORY: /opt/windows-automation/ansible
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [portal-internal]
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APP_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in the protected .env file}
+      MOCK_MODE: ${MOCK_MODE:-true}
+      ANSIBLE_CONFIG: /opt/windows-automation/ansible/ansible.cfg
+      ANSIBLE_WORKING_DIRECTORY: /opt/windows-automation/ansible
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [portal-internal]
+
+  frontend:
+    build:
+      context: .
+      dockerfile: deployment/frontend.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on: [api]
+    networks: [portal-internal]
+
+volumes:
+  portal-postgres:
+
+networks:
+  portal-internal:
+    driver: bridge

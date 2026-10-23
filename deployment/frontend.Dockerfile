@@ -1,0 +1,13 @@
+FROM node:24-slim AS build
+WORKDIR /workspace
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY lib ./lib
+COPY artifacts/windows-automation-portal ./artifacts/windows-automation-portal
+RUN pnpm install --frozen-lockfile
+RUN PORT=5173 BASE_PATH=/ pnpm --filter @workspace/windows-automation-portal run build
+
+FROM nginx:1.27-alpine
+COPY deployment/nginx/default.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /workspace/artifacts/windows-automation-portal/dist/public /usr/share/nginx/html
+EXPOSE 80

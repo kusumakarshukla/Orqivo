@@ -180,7 +180,7 @@ async def execute_job(job_id: UUID) -> None:
             )
     except Exception as exc:  # noqa: BLE001 - worker must persist a safe failed result.
         message = sanitize_text(str(exc))
-        logger.exception("Job execution failed", extra={"job_id": str(job_id)})
+        logger.error("Job execution failed: %s", message, extra={"job_id": str(job_id)})
         with SessionLocal.begin() as db:
             job = db.get(Job, job_id)
             if job is not None:
@@ -218,8 +218,8 @@ async def run_worker() -> None:
                 task = asyncio.create_task(execute_job(job_id))
                 active.add(task)
             await asyncio.sleep(1)
-        except Exception:
-            logger.exception("Worker polling failed")
+        except Exception as exc:
+            logger.error("Worker polling failed: %s", sanitize_text(exc))
             await asyncio.sleep(3)
     if active:
         await asyncio.gather(*active, return_exceptions=True)

@@ -1,0 +1,23 @@
+[Unit]
+Description=Windows Automation Portal background worker
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=windows-automation
+Group=windows-automation
+WorkingDirectory=/opt/windows-automation/backend
+EnvironmentFile=/etc/windows-automation.env
+Environment=PYTHONPATH=/opt/windows-automation/backend
+ExecStart=/opt/windows-automation/.venv/bin/python -m app.worker
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/windows-automation/var
+
+[Install]
+WantedBy=multi-user.target

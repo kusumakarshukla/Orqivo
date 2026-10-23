@@ -40,6 +40,7 @@ from app.schemas import (
     AuditFilter,
     AutomationInput,
     JobInput,
+    LoginInput,
     ServerInput,
     StatusInput,
 )
@@ -214,13 +215,6 @@ def validate_parameters(automation: AutomationDefinition, values: dict[str, Any]
         if definition.get("type") == "text" and (not isinstance(value, str) or len(value) > 500 or "\n" in value or "\r" in value):
             return f"{definition.get('label', name)} is invalid."
     return None
-
-
-def require_role(*roles: str):
-    def check(user: Annotated[User, Depends(lambda: None)]) -> User:
-        del user
-        raise RuntimeError("Role dependency must be bound to authenticated_user")
-    return check
 
 
 def get_authenticated_user(request: Request, db: Session = Depends(get_db)) -> User:
@@ -863,7 +857,7 @@ def list_audit_logs(
         conditions.append(or_(AuditLog.action.ilike(pattern), AuditLog.resource_type.ilike(pattern)))
     where = and_(*conditions) if conditions else True
     total = db.scalar(select(func.count(AuditLog.id)).where(where)) or 0
-    rows = db.scalars(select(AuditLog).options(joinedload(AuditLog.user) if hasattr(AuditLog, "user") else ()).where(where).order_by(AuditLog.created_at.desc()).offset((page - 1) * page_size).limit(page_size)).all()
+    rows = db.scalars(select(AuditLog).where(where).order_by(AuditLog.created_at.desc()).offset((page - 1) * page_size).limit(page_size)).all()
     items = []
     for row in rows:
         audit_user = db.get(User, row.user_id) if row.user_id else None

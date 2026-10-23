@@ -20,6 +20,7 @@ SCRIPT_REGISTRY = {
     "restart_windows_service": "Restart-WindowsService.ps1",
     "get_server_health": "Get-ServerHealth.ps1",
     "get_disk_space": "Get-DiskSpace.ps1",
+    "test_windows_connection": "test_windows_connection.yml",
 }
 SAFE_SERVER_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 SAFE_HOSTNAME = re.compile(r"^[A-Za-z0-9.-]{1,253}$")

@@ -58,6 +58,7 @@ class UserSession(Base):
     csrf_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    user: Mapped[User] = relationship()
 
 
 class Server(Base):

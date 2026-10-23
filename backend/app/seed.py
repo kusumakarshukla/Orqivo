@@ -81,6 +81,8 @@ def seed() -> None:
                     password_hash=hash_password(password) if password else "password-not-configured",
                 )
                 db.add(users[email])
+            elif password and users[email].password_hash == "password-not-configured":
+                users[email].password_hash = hash_password(password)
 
         servers = {server.name for server in db.scalars(select(Server)).all()}
         for name, display_name, hostname in SERVER_DATA:

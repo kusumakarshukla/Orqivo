@@ -248,13 +248,18 @@ async function ensureSeeded(): Promise<void> {
     ];
     await db.insert(rolesTable).values(roles).onConflictDoNothing();
     const existingUsers = await db
-      .select({ email: usersTable.email })
+      .select({ email: usersTable.email, passwordHash: usersTable.passwordHash })
       .from(usersTable);
-    const existing = new Set(existingUsers.map((user) => user.email));
+    const existing = new Map(existingUsers.map((user) => [user.email, user.passwordHash]));
     const roleRows = await db.select().from(rolesTable);
     const roleIds = new Map(roleRows.map((role) => [role.name, role.id]));
     const userSeeds: Array<[string, string, RoleName, string | undefined]> = [
-      ["admin@example.com", "Admin User", "admin", "admin"],
+      [
+        "admin@example.com",
+        "Admin User",
+        "admin",
+        process.env.DEV_ADMIN_PASSWORD,
+      ],
       [
         "operator@example.com",
         "Operator User",
@@ -269,6 +274,10 @@ async function ensureSeeded(): Promise<void> {
       ],
     ];
     for (const [email, fullName, role, password] of userSeeds) {
+      const existingPassword = existing.get(email);
+      const hasLegacyDefault = existingPassword
+        ? await passwordMatches("admin", existingPassword)
+        : false;
       if (!existing.has(email) && roleIds.has(role)) {
         await db
           .insert(usersTable)
@@ -282,6 +291,19 @@ async function ensureSeeded(): Promise<void> {
             isActive: true,
           })
           .onConflictDoNothing();
+      } else if (
+        password &&
+        (existingPassword === "password-not-configured" || hasLegacyDefault)
+      ) {
+        await db
+          .update(usersTable)
+          .set({ passwordHash: await passwordHash(password), updatedAt: now() })
+          .where(eq(usersTable.email, email));
+      } else if (role === "admin" && !password && hasLegacyDefault) {
+        await db
+          .update(usersTable)
+          .set({ passwordHash: "password-not-configured", updatedAt: now() })
+          .where(eq(usersTable.email, email));
       }
     }
     const serverSeeds = [

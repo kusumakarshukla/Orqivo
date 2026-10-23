@@ -24,9 +24,9 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } });
 const seeded = [
-  { label: 'Administrator', email: 'admin@portal.local', role: 'admin' },
-  { label: 'Operator', email: 'operator@portal.local', role: 'operator' },
-  { label: 'Viewer', email: 'viewer@portal.local', role: 'viewer' },
+  { label: 'Administrator', email: 'admin@example.com', role: 'admin' },
+  { label: 'Operator', email: 'operator@example.com', role: 'operator' },
+  { label: 'Viewer', email: 'viewer@example.com', role: 'viewer' },
 ];
 const rolePower = { viewer: 0, operator: 1, admin: 2 };
 const roleCan = (role: User['role'] | undefined, required: User['role']) =>

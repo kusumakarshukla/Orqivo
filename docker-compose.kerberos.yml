@@ -1,0 +1,16 @@
+services:
+  api:
+    environment:
+      KRB5_CONFIG: /etc/krb5.conf
+      WINDOWS_CA_CERTIFICATE_PATH: /run/secrets/windows-ca.pem
+    volumes:
+      - ${KRB5_CONFIG_FILE:?Set KRB5_CONFIG_FILE to the approved krb5.conf path}:/etc/krb5.conf:ro
+      - ${WINDOWS_CA_CERTIFICATE_FILE:?Set WINDOWS_CA_CERTIFICATE_FILE to the internal CA PEM path}:/run/secrets/windows-ca.pem:ro
+
+  worker:
+    environment:
+      KRB5_CONFIG: /etc/krb5.conf
+      WINDOWS_CA_CERTIFICATE_PATH: /run/secrets/windows-ca.pem
+    volumes:
+      - ${KRB5_CONFIG_FILE:?Set KRB5_CONFIG_FILE to the approved krb5.conf path}:/etc/krb5.conf:ro
+      - ${WINDOWS_CA_CERTIFICATE_FILE:?Set WINDOWS_CA_CERTIFICATE_FILE to the internal CA PEM path}:/run/secrets/windows-ca.pem:ro

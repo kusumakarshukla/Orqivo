@@ -4,5 +4,6 @@ SQLAlchemy>=2.0,<3.0
 psycopg[binary]>=3.2,<4.0
 alembic>=1.13,<2.0
 pydantic-settings>=2.4,<3.0
+msal>=1.30,<2.0
 ansible-core>=2.16,<3.0
-pywinrm>=0.4,<1.0
+pywinrm[kerberos]>=0.4,<1.0

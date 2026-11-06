@@ -6,6 +6,7 @@
     - name: Run the registered PowerShell health script
       ansible.windows.win_powershell:
         path: C:\Automation\Get-ServerHealth.ps1
+        remote_src: true
       register: script_result
       no_log: true
       timeout: 120

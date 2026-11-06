@@ -1,5 +1,5 @@
 [Unit]
-Description=Windows Automation Portal background worker
+Description=Orqivo Windows Automation background worker
 After=network-online.target postgresql.service
 Wants=network-online.target
 

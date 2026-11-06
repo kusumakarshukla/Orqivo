@@ -69,51 +69,51 @@
 
 /* LIGHT MODE */
 :root {
-  --button-outline: rgba(0, 0, 0, 0.1);
-  --badge-outline: rgba(0, 0, 0, 0.05);
+  --button-outline: rgba(8, 29, 61, 0.12);
+  --badge-outline: rgba(8, 29, 61, 0.06);
 
   /* Automatic computation of border around primary / danger buttons */
   --opaque-button-border-intensity: -8; /* In terms of percentages */
 
   /* Backgrounds applied on top of other backgrounds when hovered/active */
-  --elevate-1: rgba(0, 0, 0, 0.03);
-  --elevate-2: rgba(0, 0, 0, 0.08);
+  --elevate-1: rgba(15, 45, 90, 0.04);
+  --elevate-2: rgba(15, 45, 90, 0.08);
 
   --background: 216 33% 97%;
-  --foreground: 219 38% 17%;
-  --border: 215 24% 89%;
+  --foreground: 220 45% 17%;
+  --border: 214 26% 88%;
   --card: 0 0% 100%;
-  --card-foreground: 219 38% 17%;
-  --card-border: 215 24% 89%;
-  --sidebar: 218 38% 18%;
+  --card-foreground: 220 45% 17%;
+  --card-border: 214 26% 88%;
+  --sidebar: 221 71% 16%;
   --sidebar-foreground: 215 30% 91%;
-  --sidebar-border: 218 28% 27%;
-  --sidebar-primary: 213 91% 58%;
+  --sidebar-border: 220 50% 25%;
+  --sidebar-primary: 214 78% 28%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 218 30% 25%;
+  --sidebar-accent: 217 57% 20%;
   --sidebar-accent-foreground: 0 0% 100%;
-  --sidebar-ring: 213 91% 58%;
+  --sidebar-ring: 24 91% 54%;
   --popover: 0 0% 100%;
-  --popover-foreground: 219 38% 17%;
-  --popover-border: 215 24% 89%;
-  --primary: 213 91% 48%;
+  --popover-foreground: 220 45% 17%;
+  --popover-border: 214 26% 88%;
+  --primary: 214 77% 22%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 213 45% 94%;
-  --secondary-foreground: 218 38% 24%;
+  --secondary: 214 53% 95%;
+  --secondary-foreground: 220 45% 17%;
   --muted: 216 27% 94%;
   --muted-foreground: 217 13% 48%;
-  --accent: 158 43% 92%;
-  --accent-foreground: 158 54% 26%;
+  --accent: 24 90% 55%;
+  --accent-foreground: 0 0% 100%;
   --destructive: 0 68% 49%;
   --destructive-foreground: 0 0% 100%;
   --input: 215 24% 86%;
-  --ring: 213 91% 48%;
-  --chart-1: 213 91% 48%;
-  --chart-2: 151 48% 42%;
-  --chart-3: 39 88% 56%;
-  --chart-4: 0 68% 55%;
-  --chart-5: 222 32% 38%;
-  --app-font-sans: 'DM Sans', sans-serif;
+  --ring: 24 90% 55%;
+  --chart-1: 214 77% 22%;
+  --chart-2: 24 90% 55%;
+  --chart-3: 193 78% 42%;
+  --chart-4: 146 45% 41%;
+  --chart-5: 220 36% 32%;
+  --app-font-sans: 'DM Sans', 'Segoe UI', sans-serif;
   --app-font-serif: Georgia, serif;
   --app-font-mono: 'Space Mono', monospace;
   --radius: 0.5rem; /* 8px */
@@ -273,9 +273,9 @@
   :focus-visible { outline: 3px solid hsl(var(--primary) / .45); outline-offset: 2px; }
 }
 
-.portal-shell { min-height: 100dvh; background: #f3f6fa; }
-.portal-sidebar { background: #202f46; color: #eaf0f7; }
-.portal-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 2px 8px rgba(26,45,73,.035); }
+.portal-shell { min-height: 100dvh; background: #f4f7fb; }
+.portal-sidebar { background: linear-gradient(180deg, #0b1e3b 0%, #112d59 100%); color: #edf3ff; }
+.portal-card { background: white; border: 1px solid #e3ebf7; border-radius: 12px; box-shadow: 0 2px 8px rgba(11,30,59,.045); }
 .portal-nav-link { transition: background .16s ease, color .16s ease, transform .16s ease; }
 .portal-nav-link:hover { transform: translateX(2px); }
 .mono { font-family: var(--app-font-mono); }
@@ -284,6 +284,7 @@
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
 
 .dark .portal-shell { background: #151f2d; color: #e5edf6; }
+.dark body { background: #151f2d; color: #e5edf6; }
 .dark .portal-shell header { background: rgba(25, 38, 55, .96); border-color: #34465b; }
 .dark .portal-card { background: #1d2b3e; border-color: #34465b; box-shadow: none; }
 .dark .portal-shell h1, .dark .portal-shell h2, .dark .portal-shell h3 { color: #e5edf6; }
@@ -295,6 +296,18 @@
 .dark .portal-shell .border-slate-100, .dark .portal-shell .border-slate-200 { border-color: #34465b; }
 .dark .portal-shell .text-slate-400, .dark .portal-shell .text-slate-500, .dark .portal-shell .text-slate-600 { color: #a9b8ca; }
 .dark .portal-shell .hover\:bg-slate-50:hover, .dark .portal-shell .hover\:bg-slate-100:hover { background-color: #26384f; }
+.dark .portal-shell [class~="text-[#102d59]"], .dark .portal-shell [class~="text-[#23487d]"] { color: #c9d8e9; }
+.dark .portal-shell [class*="text-[#"], .dark .portal-shell [class^="text-blue-"], .dark .portal-shell [class*=" text-blue-"], .dark .portal-shell [class^="text-indigo-"], .dark .portal-shell [class*=" text-indigo-"], .dark .portal-shell [class^="text-sky-"], .dark .portal-shell [class*=" text-sky-"] { color: #f8fbff !important; }
+.dark .portal-shell header nav a, .dark .portal-shell header > div > a:not([aria-label="Automation Tracker"]) { border: 1px solid #71839a; color: #f8fbff !important; }
+.dark .portal-shell header nav a:hover, .dark .portal-shell header > div > a:not([aria-label="Automation Tracker"]):hover { background-color: #2b3c52; border-color: #f8fbff; }
+.dark .portal-shell header nav a[aria-current="page"] { background-color: #25364b; border-color: #f8fbff; color: #fff !important; }
+.dark .portal-shell header [data-testid="link-profile-top"] { border: 2px solid #f8fbff; background-color: #25364b; color: #fff !important; }
+.dark .portal-shell .portal-card { border-color: #687b92; }
+.dark .portal-shell .portal-card h1, .dark .portal-shell .portal-card h2, .dark .portal-shell .portal-card h3 { color: #fff; }
+.dark .settings-page [class*="text-[#"], .dark .settings-page h1, .dark .settings-page h2, .dark .settings-page h3 { color: #e5edf6; }
+.dark .settings-page .text-slate-400, .dark .settings-page .text-slate-500, .dark .settings-page .text-slate-600, .dark .settings-page .text-slate-700 { color: #a9b8ca; }
+.dark .settings-page .border-slate-100, .dark .settings-page .border-slate-200 { border-color: #34465b; }
+.dark .settings-page .bg-\[\#eaf1f8\], .dark .settings-page .bg-\[\#edf3ff\] { background-color: #26384f; }
 
 /**
  * Using the elevate system.

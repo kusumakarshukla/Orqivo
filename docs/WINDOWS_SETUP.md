@@ -55,6 +55,9 @@ New-Item -ItemType Directory -Path C:\Automation -Force
 Copy-Item .\powershell\Restart-WindowsService.ps1 C:\Automation\
 Copy-Item .\powershell\Get-ServerHealth.ps1 C:\Automation\
 Copy-Item .\powershell\Get-DiskSpace.ps1 C:\Automation\
+Copy-Item .\powershell\Create-PermanentAccount.ps1 C:\Automation\
+Copy-Item .\powershell\Create-ConsultantAccount.ps1 C:\Automation\
+Copy-Item .\powershell\Disable-ADAccount.ps1 C:\Automation\
 ```
 
 Grant read/execute rights only to the approved automation identity and administrators:

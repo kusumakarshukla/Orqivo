@@ -3,7 +3,7 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: Windows Automation Portal API
+  description: Orqivo Windows Automation API
 servers:
   - url: /api
     description: Base API path
@@ -13,6 +13,8 @@ tags:
   - { name: automations, description: Approved automation catalogue }
   - { name: servers, description: Registered Windows servers }
   - { name: jobs, description: Automation execution jobs }
+  - { name: account-state-requests, description: Active Directory account requests with a guarded non-production test execution path }
+  - { name: catalogue-requests, description: TechHub account and BitLocker requests }
   - { name: audit, description: Append-only audit history }
   - { name: health, description: Health operations }
 paths:
@@ -85,6 +87,21 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/Job" }
+  /v1/admin/automation-tracker:
+    get:
+      operationId: getAutomationTracker
+      tags: [dashboard]
+      summary: Get monthly automation analytics
+      description: Administrator-only monthly request trends, execution outcomes, year-to-date totals, and top catalogues.
+      parameters:
+        - { name: year, in: query, required: true, schema: { type: integer, minimum: 2000, maximum: 2100 } }
+        - { name: month, in: query, required: true, schema: { type: integer, minimum: 1, maximum: 12 } }
+      responses:
+        "200":
+          description: Monthly automation metrics and daily request trend
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationTracker" }
   /v1/automations:
     get:
       operationId: listAutomations
@@ -340,6 +357,89 @@ paths:
           content:
             text/plain:
               schema: { type: string }
+  /v1/account-state-requests:
+    post:
+      operationId: createAccountStateRequest
+      tags: [account-state-requests]
+      summary: Submit an Active Directory account state request
+      description: Disable requests enqueue a playbook only when test mode is enabled and the registered non-production target is valid. Other requests remain intake-only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AccountStateRequestInput" }
+      responses:
+        "202":
+          description: Request recorded or queued for non-production test execution
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccountStateRequest" }
+    get:
+      operationId: listAccountStateRequests
+      tags: [account-state-requests]
+      summary: List visible Active Directory account requests
+      description: Returns up to 100 recent requests. Operators see only their own requests; administrators see all.
+      responses:
+        "200":
+          description: Recent request intake records
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AccountStateRequest" }
+  /v1/catalogue-requests:
+    post:
+      operationId: createCatalogueRequest
+      tags: [catalogue-requests]
+      summary: Record an account or BitLocker request
+      description: Queues permanent and consultant account creation for the configured non-production demo OU when enabled; otherwise records the request for review. BitLocker requests remain review-only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CatalogueRequestInput" }
+      responses:
+        "202":
+          description: Request recorded or queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogueRequest" }
+    get:
+      operationId: listCatalogueRequests
+      tags: [catalogue-requests]
+      summary: List visible TechHub catalogue requests
+      description: Returns up to 100 recent requests. Operators see their own requests; administrators see all.
+      responses:
+        "200":
+          description: Recent request intake records
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CatalogueRequest" }
+  /v1/catalogue-requests/{request_id}/execute:
+    post:
+      operationId: executeCatalogueRequest
+      tags: [catalogue-requests]
+      summary: Queue a submitted account-creation request
+      description: Queues an existing unlinked permanent or consultant account request for the configured non-production demo OU. Requires an operator or administrator session and enabled demo execution.
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "202":
+          description: Account-creation job queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CatalogueRequest" }
+        "404":
+          description: Request not found
+        "409":
+          description: Request already linked to a job or not eligible for execution
+        "503":
+          description: Demo target, worker, or execution configuration unavailable
   /v1/audit-logs:
     get:
       operationId: listAuditLogs
@@ -381,7 +481,7 @@ components:
         password: { type: string, minLength: 1 }
     DashboardSummary:
       type: object
-      required: [total, running, successful, failed, success_rate, mock_mode, worker_online, by_status]
+      required: [total, running, successful, failed, success_rate, mock_mode, ansible_enabled, worker_online, by_status]
       properties:
         total: { type: integer }
         running: { type: integer }
@@ -389,10 +489,55 @@ components:
         failed: { type: integer }
         success_rate: { type: number }
         mock_mode: { type: boolean }
+        ansible_enabled: { type: boolean }
         worker_online: { type: boolean }
         by_status:
           type: object
           additionalProperties: { type: integer }
+    TrackerMetrics:
+      type: object
+      required: [total_executed, successful, failed, cancelled, success_rate, failure_rate, average_duration_seconds]
+      properties:
+        total_executed: { type: integer, description: Successful, failed, and timed-out executions. }
+        successful: { type: integer }
+        failed: { type: integer, description: Failed and timed-out executions. }
+        cancelled: { type: integer }
+        success_rate: { type: number }
+        failure_rate: { type: number }
+        average_duration_seconds: { type: ["number", "null"] }
+    AutomationTracker:
+      allOf:
+        - { $ref: "#/components/schemas/TrackerMetrics" }
+        - type: object
+          required: [year, month, month_label, total_requests, ytd, daily, top_catalogues]
+          properties:
+            year: { type: integer }
+            month: { type: integer }
+            month_label: { type: string }
+            total_requests: { type: integer, description: Job submissions plus account-state and TechHub catalogue intake requests. }
+            ytd: { $ref: "#/components/schemas/TrackerMetrics" }
+            daily:
+              type: array
+              items:
+                type: object
+                required: [date, job_requests, account_requests, catalogue_requests, total_requests]
+                properties:
+                  date: { type: string, format: date }
+                  job_requests: { type: integer }
+                  account_requests: { type: integer }
+                  catalogue_requests: { type: integer }
+                  total_requests: { type: integer }
+            top_catalogues:
+              type: array
+              items:
+                type: object
+                required: [code, name, total_executed, successful, failed]
+                properties:
+                  code: { type: string }
+                  name: { type: string }
+                  total_executed: { type: integer }
+                  successful: { type: integer }
+                  failed: { type: integer }
     Automation:
       type: object
       required: [id, code, name, description, playbook_key, powershell_script_key, parameter_schema, risk_level, timeout_seconds, required_role, requires_change_number, requires_confirmation, is_active, target_os, expected_minutes]
@@ -459,7 +604,7 @@ components:
         id: { type: string, format: uuid }
         name: { type: string }
         display_name: { type: string }
-        hostname: { type: string }
+        hostname: { type: string, description: "Private DNS FQDN matching the WinRM TLS certificate; IP addresses are not accepted." }
         environment: { type: string }
         operating_system: { type: string }
         winrm_port: { type: integer }
@@ -475,12 +620,12 @@ components:
       properties:
         name: { type: string }
         display_name: { type: string }
-        hostname: { type: string }
+        hostname: { type: string, description: "Private DNS FQDN matching the WinRM TLS certificate; IP addresses are not accepted." }
         environment: { type: string }
         operating_system: { type: string }
-        winrm_port: { type: integer, minimum: 1, maximum: 65535 }
-        use_https: { type: boolean }
-        certificate_validation: { type: string }
+        winrm_port: { type: integer, enum: [5986] }
+        use_https: { type: boolean, enum: [true] }
+        certificate_validation: { type: string, enum: [validate] }
         credential_reference: { type: string }
         is_active: { type: boolean }
     ConnectionResult:
@@ -535,6 +680,99 @@ components:
         business_reason: { type: string, minLength: 3, maxLength: 1000 }
         confirmed: { type: boolean, const: true }
         simulate_failure: { type: boolean }
+    AccountStateRequestInput:
+      type: object
+      additionalProperties: false
+      required: [action, sam_account_name]
+      properties:
+        action:
+          type: string
+          enum: [disable_ad_account, enable_stale_account]
+        sam_account_name:
+          type: string
+          minLength: 1
+          maxLength: 20
+          pattern: "^[A-Za-z0-9._$-]+$"
+    AccountStateRequest:
+      type: object
+      required: [id, action, sam_account_name, status, job_id, submitted_at, requested_by]
+      properties:
+        id: { type: string, format: uuid }
+        action: { type: string, enum: [disable_ad_account, enable_stale_account] }
+        sam_account_name: { type: string, maxLength: 20 }
+        status: { type: string, enum: [awaiting_automation_integration, queued, running, successful, failed, timed_out, cancelled] }
+        job_id: { type: ["string", "null"], format: uuid }
+        submitted_at: { type: string, format: date-time }
+        requested_by: { type: string }
+    CatalogueRequestInput:
+      oneOf:
+        - { $ref: "#/components/schemas/PermanentAccountRequestInput" }
+        - { $ref: "#/components/schemas/ConsultantAccountRequestInput" }
+        - { $ref: "#/components/schemas/BitlockerKeyRequestInput" }
+      discriminator:
+        propertyName: catalogue
+    PermanentAccountRequestInput:
+      type: object
+      additionalProperties: false
+      required: [catalogue, parent_company, subcompany, first_name, last_name, line_manager_sam_account_name, date_of_joining, ticket_number, office, job_title, department, mobile, staff_id, last_working_day, account_type]
+      properties:
+        catalogue: { type: string, const: create_permanent_account }
+        parent_company: { type: string, enum: [DH-HQ, DHCM, DHAM, DHE, DHGS, DHRE, Merex] }
+        subcompany: { type: string, enum: [DH-HQ, "EIT Business group", Shamal, "Smart City", "SmartCity Kochi", "SmartCity Malta", DDA, DHAM, DIDI, "D-Marin", "Dubai Residential", "TECOM Group", Ejadah, "DH Entertainment", "Global Village", DHRE, "Merex Investments Group", Idama, "Roxy Cinemas", "Green Planet Dubai", "Sea Breeze", DHI, DHHAM, ARN] }
+        first_name: { type: string, minLength: 1, maxLength: 100 }
+        last_name: { type: string, minLength: 1, maxLength: 100 }
+        middle_name: { type: string, maxLength: 100 }
+        line_manager_sam_account_name: { type: string, minLength: 1, maxLength: 20, pattern: "^[A-Za-z0-9._$-]+$" }
+        date_of_joining: { type: string, format: date }
+        ticket_number: { type: string, minLength: 1, maxLength: 64 }
+        office: { type: string, minLength: 1, maxLength: 160 }
+        job_title: { type: string, minLength: 1, maxLength: 160 }
+        department: { type: string, minLength: 1, maxLength: 160 }
+        mobile: { type: string, minLength: 7, maxLength: 30, pattern: "^[0-9+(). -]+$" }
+        staff_id: { type: string, minLength: 1, maxLength: 64 }
+        last_working_day: { type: string, format: date }
+        account_type: { type: string, enum: [Permanent, Temporary] }
+    ConsultantAccountRequestInput:
+      type: object
+      additionalProperties: false
+      required: [catalogue, first_name, last_name, last_working_day, line_manager_sam, date_of_joining, ticket_number, office, job_title, department, mobile, account_type, parent_company, subcompany]
+      properties:
+        catalogue: { type: string, const: create_consultant_account }
+        first_name: { type: string, minLength: 1, maxLength: 100 }
+        last_name: { type: string, minLength: 1, maxLength: 100 }
+        middle_name: { type: string, maxLength: 100 }
+        last_working_day: { type: string, format: date }
+        line_manager_sam: { type: string, minLength: 1, maxLength: 20, pattern: "^[A-Za-z0-9._$-]+$" }
+        date_of_joining: { type: string, format: date }
+        ticket_number: { type: string, minLength: 1, maxLength: 64 }
+        office: { type: string, minLength: 1, maxLength: 160 }
+        job_title: { type: string, minLength: 1, maxLength: 160 }
+        department: { type: string, minLength: 1, maxLength: 160 }
+        mobile: { type: string, minLength: 7, maxLength: 30, pattern: "^[0-9+(). -]+$" }
+        account_type: { type: string, enum: [Consultant, Vendor] }
+        parent_company: { type: string, enum: [DH-HQ, DHCM, DHAM, DHE, DHGS, DHRE, Merex] }
+        subcompany: { type: string, enum: [DH-HQ, "EIT Business group", Shamal, "Smart City", "SmartCity Kochi", "SmartCity Malta", DDA, DHAM, DIDI, "D-Marin", "Dubai Residential", "TECOM Group", Ejadah, "DH Entertainment", "Global Village", DHRE, "Merex Investments Group", Idama, "Roxy Cinemas", "Green Planet Dubai", "Sea Breeze", DHI, DHHAM, ARN] }
+    BitlockerKeyRequestInput:
+      type: object
+      additionalProperties: false
+      required: [catalogue, device_name, ticket_number, requester_email, sd_agent_email]
+      properties:
+        catalogue: { type: string, const: bitlocker_key_retrieval }
+        device_name: { type: string, minLength: 1, maxLength: 253, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$" }
+        ticket_number: { type: string, minLength: 1, maxLength: 64 }
+        requester_email: { type: string, format: email, maxLength: 320 }
+        sd_agent_email: { type: string, format: email, maxLength: 320 }
+    CatalogueRequest:
+      type: object
+      required: [id, catalogue, request_data, status, job_id, submitted_at, requested_by]
+      properties:
+        id: { type: string, format: uuid }
+        catalogue: { type: string, enum: [create_permanent_account, create_consultant_account, bitlocker_key_retrieval] }
+        request_data: { type: object, additionalProperties: true }
+        status: { type: string, enum: [submitted_for_review, queued, running, successful, failed, timed_out, cancelled] }
+        job_id: { type: ["string", "null"], format: uuid }
+        submitted_at: { type: string, format: date-time }
+        requested_by: { type: string }
     JobEvent:
       type: object
       required: [id, event_type, message, created_at]
@@ -577,4 +815,3 @@ components:
         total: { type: integer }
         page: { type: integer }
         page_size: { type: integer }
-

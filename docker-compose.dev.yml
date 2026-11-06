@@ -1,0 +1,49 @@
+services:
+  api:
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--proxy-headers",
+        "--reload",
+      ]
+    environment:
+      ALLOWED_ORIGINS: "http://localhost:${WEB_PORT:-8080},http://127.0.0.1:${WEB_PORT:-8080}"
+      WATCHFILES_FORCE_POLLING: "true"
+    volumes: &application_mounts
+      - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+      - ./backend/alembic.ini:/app/alembic.ini:ro
+      - ./ansible:/opt/windows-automation/ansible:ro
+
+  worker:
+    volumes: *application_mounts
+
+  frontend:
+    build:
+      target: development
+    command:
+      [
+        "pnpm",
+        "--filter",
+        "@workspace/windows-automation-portal",
+        "run",
+        "dev",
+      ]
+    environment:
+      BASE_PATH: /
+      API_PROXY_TARGET: http://api:8000
+      CHOKIDAR_USEPOLLING: "true"
+    ports: !override
+      - "${WEB_PORT:-8080}:3000"
+    volumes:
+      - ./artifacts/windows-automation-portal/src:/workspace/artifacts/windows-automation-portal/src
+      - ./artifacts/windows-automation-portal/public:/workspace/artifacts/windows-automation-portal/public
+      - ./artifacts/windows-automation-portal/index.html:/workspace/artifacts/windows-automation-portal/index.html:ro
+      - ./artifacts/windows-automation-portal/vite.config.ts:/workspace/artifacts/windows-automation-portal/vite.config.ts:ro
+      - ./lib/api-client-react/src:/workspace/lib/api-client-react/src
+      - ./lib/api-zod/src:/workspace/lib/api-zod/src

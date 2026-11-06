@@ -1,0 +1,73 @@
+---
+- name: Create an AD account in the configured non-production OU
+  hosts: windows
+  gather_facts: false
+  tasks:
+    - name: Print received input values
+      ansible.builtin.debug:
+        msg:
+          - "First Name: {{ first_name | default('NOT RECEIVED') }}"
+          - "Last Name: {{ last_name | default('NOT RECEIVED') }}"
+          - "Account Type: {{ account_type | default('NOT RECEIVED') }}"
+    - name: Check input variables
+      ansible.builtin.debug:
+        msg:
+          first_name_defined: "{{ first_name is defined }}"
+          last_name_defined: "{{ last_name is defined }}"
+          account_type_defined: "{{ account_type is defined }}"
+    - name: Validate the target OU and required identity fields
+      ansible.builtin.assert:
+        that:
+          - first_name is string
+          - first_name | length > 0
+          - last_name is string
+          - last_name | length > 0
+          - account_type in ['Permanent', 'Temporary', 'Consultant', 'Vendor']
+        fail_msg: "A first name, and last name are required."
+
+    - name: Run the registered PowerShell account-creation script on the target
+      ansible.windows.win_powershell:
+        script: |
+          param(
+            [Parameter(Mandatory = $true)][string]$ScriptPath,
+            [Parameter(Mandatory = $true)][hashtable]$ScriptArguments
+          )
+
+          Invoke-Command -ScriptBlock {
+            param([string]$Path, [hashtable]$Arguments)
+            & $Path @Arguments
+          } -ArgumentList $ScriptPath, $ScriptArguments
+        parameters:
+          ScriptPath: "{{ 'C:\\Automation\\Create-PermanentAccount.ps1' if account_type in ['Permanent', 'Temporary'] else 'C:\\Automation\\Create-ConsultantAccount.ps1' }}"
+          ScriptArguments:
+            FirstName: "{{ first_name }}"
+            LastName: "{{ last_name }}"
+            MiddleName: "{{ middle_name | default('') }}"
+            LineManagerSam: "{{ line_manager_sam_account_name | default(line_manager_sam | default('')) }}"
+            Office: "{{ office | default('') }}"
+            JobTitle: "{{ job_title | default('') }}"
+            Department: "{{ department | default('') }}"
+            Mobile: "{{ mobile | default('') }}"
+            StaffId: "{{ staff_id | default('') }}"
+            TicketNumber: "{{ ticket_number | default('') }}"
+            DateOfJoining: "{{ date_of_joining | default('') }}"
+            AccountType: "{{ account_type | default('Permanent') }}"
+            LastWorkingDay: "{{ last_working_day | default('') }}"
+            ParentCompany: "{{ parent_company | default('') }}"
+            Subcompany: "{{ subcompany | default('') }}"
+
+      register: create_result
+      no_log: true
+      timeout: 180
+
+    - name: Print only PowerShell Write-Host output
+      ansible.builtin.debug:
+        msg: "ORQIVO_POWERSHELL_OUTPUT={{ create_result.host_out | default('') | b64encode }}"
+
+    - name: Confirm account creation
+      ansible.builtin.assert:
+        that:
+          - create_result.get('result', {}).get('success', false) | bool
+          - create_result.get('result', {}).get('enabled', false) | bool
+          - create_result.get('result', {}).get('password_change_required', false) | bool
+        fail_msg: "The user account was not created successfully."

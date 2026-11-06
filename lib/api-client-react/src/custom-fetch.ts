@@ -148,6 +148,28 @@ function truncate(text: string, maxLength = 300): string {
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
 }
 
+function getValidationDetails(data: unknown): string | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const detail = (data as Record<string, unknown>).detail;
+  if (!Array.isArray(detail)) return undefined;
+  const issues = detail
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
+    .map(item => {
+      const location = Array.isArray(item.loc)
+        ? item.loc.filter((part): part is string | number => typeof part === "string" || typeof part === "number")
+          .filter(part => part !== "body")
+          .join(".")
+        : "";
+      const message = typeof item.msg === "string" ? item.msg : "";
+      return location && message ? `${location}: ${message}` : "";
+    })
+    .filter(Boolean)
+    .slice(0, 4);
+  if (!issues.length) return undefined;
+  const remaining = detail.length - issues.length;
+  return `Validation failed — ${issues.join("; ")}${remaining > 0 ? `; and ${remaining} more issue(s)` : ""}`;
+}
+
 function buildErrorMessage(response: Response, data: unknown): string {
   const prefix = `HTTP ${response.status} ${response.statusText}`;
 
@@ -158,11 +180,13 @@ function buildErrorMessage(response: Response, data: unknown): string {
 
   const title = getStringField(data, "title");
   const detail = getStringField(data, "detail");
+  const validationDetails = getValidationDetails(data);
   const message =
     getStringField(data, "message") ??
     getStringField(data, "error_description") ??
     getStringField(data, "error");
 
+  if (validationDetails) return `${prefix}: ${validationDetails}`;
   if (title && detail) return `${prefix}: ${title} — ${detail}`;
   if (detail) return `${prefix}: ${detail}`;
   if (message) return `${prefix}: ${message}`;

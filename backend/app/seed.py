@@ -16,8 +16,7 @@ USER_DATA = [
     ("viewer@example.com", "Viewer User", "viewer", settings.dev_viewer_password),
 ]
 SERVER_DATA = [
-    ("win-server-01", "Windows Server 01", "win-server-01.invalid"),
-    ("win-server-02", "Windows Server 02", "win-server-02.invalid"),
+    ("ad-server", "Windows Automation Server", "ad-server.southindia.cloudapp.azure.com"),
 ]
 
 AUTOMATIONS = [
@@ -55,7 +54,32 @@ AUTOMATIONS = [
             "options": ["C", "D", "E", "F"],
         }],
         "risk_level": "low", "timeout_seconds": 180, "required_role": "operator",
-        "requires_change_number": False, "requires_confirmation": True, "is_active": True,
+        "requires_change_number": False, "requires_confirmation": False, "is_active": True,
+        "target_os": "Windows Server", "expected_minutes": 2,
+    },
+    {
+        "code": "disable_ad_account",
+        "name": "Disable AD Account",
+        "description": "Disable an account based on its SamAccountName.",
+        "playbook_key": "disable_ad_account",
+        "powershell_script_key": "disable_ad_account",
+        "parameter_schema": [{
+            "name": "sam_account_name", "label": "SamAccountName", "type": "text", "required": True,
+            "options": [],
+        }],
+        "risk_level": "high", "timeout_seconds": 180, "required_role": "operator",
+        "requires_change_number": False, "requires_confirmation": False, "is_active": True,
+        "target_os": "Windows Server", "expected_minutes": 2,
+    },
+    {
+        "code": "create_ad_account",
+        "name": "Create AD Account",
+        "description": "Create an enabled account in the configured directory.",
+        "playbook_key": "create_ad_account",
+        "powershell_script_key": "create_ad_account",
+        "parameter_schema": [],
+        "risk_level": "low", "timeout_seconds": 180, "required_role": "operator",
+        "requires_change_number": False, "requires_confirmation": False, "is_active": True,
         "target_os": "Windows Server", "expected_minutes": 2,
     },
 ]
@@ -90,14 +114,23 @@ def seed() -> None:
                 db.add(Server(
                     name=name, display_name=display_name, hostname=hostname,
                     environment="Development", operating_system="Windows Server 2022",
-                    winrm_port=5986, use_https=True, certificate_validation="validate",
+                    winrm_port=5985, use_https=False, certificate_validation=None,
                     credential_reference="WINDOWS_PASSWORD",
                 ))
 
-        automations = {item.code for item in db.scalars(select(AutomationDefinition)).all()}
+        automations = {
+            item.code: item for item in db.scalars(select(AutomationDefinition)).all()
+        }
         for item in AUTOMATIONS:
-            if item["code"] not in automations:
+            existing = automations.get(item["code"])
+            if existing is None:
                 db.add(AutomationDefinition(**item))
+            else:
+                # The implementation keys are fixed by the runner allowlist.
+                # Reconcile them for existing built-in records without
+                # overwriting admin-managed catalogue metadata or parameters.
+                existing.playbook_key = item["playbook_key"]
+                existing.powershell_script_key = item["powershell_script_key"]
 
 
 if __name__ == "__main__":

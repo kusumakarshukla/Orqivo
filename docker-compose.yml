@@ -22,7 +22,8 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      APP_ENV: production
+      APP_ENV: ${APP_ENV:-development}
+      ALLOWED_ORIGINS: "http://localhost:8080,http://127.0.0.1:8080"
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in the protected .env file}
       MOCK_MODE: ${MOCK_MODE:-true}
       ANSIBLE_CONFIG: /opt/windows-automation/ansible/ansible.cfg
@@ -40,7 +41,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      APP_ENV: production
+      APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in the protected .env file}
       MOCK_MODE: ${MOCK_MODE:-true}
       ANSIBLE_CONFIG: /opt/windows-automation/ansible/ansible.cfg

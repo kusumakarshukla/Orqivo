@@ -1,4 +1,4 @@
-.PHONY: setup dev migrate seed test lint ansible-check docker-up docker-down
+.PHONY: setup dev migrate seed test lint ansible-check docker-up docker-build docker-down
 
 setup:
 	bash scripts/setup_linux.sh
@@ -23,7 +23,10 @@ ansible-check:
 	bash scripts/verify_setup.sh --ansible-only
 
 docker-up:
-	docker compose up --build -d
+	./startup.sh
+
+docker-build:
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml build api worker frontend
 
 docker-down:
-	docker compose down
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml down

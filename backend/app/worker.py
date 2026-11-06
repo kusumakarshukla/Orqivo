@@ -10,11 +10,13 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
-from app.ansible_runner import execute_playbook
+from app.ansible_runner import connection_test_automation, execute_playbook
 from app.core.config import settings
 from app.core.security import sanitize_json, sanitize_text
 from app.db.models import (
+    AccountStateRequest,
     AutomationDefinition,
+    CatalogueRequest,
     Job,
     JobEvent,
     Server,
@@ -40,6 +42,20 @@ def add_event(db, job_id: UUID, event_type: str, message: str, details: dict[str
     ))
 
 
+def sync_account_state_request(db, job_id: UUID, status: str) -> None:
+    request = db.scalar(
+        select(AccountStateRequest).where(AccountStateRequest.job_id == job_id)
+    )
+    if request is not None:
+        request.status = status
+
+
+def sync_catalogue_request(db, job_id: UUID, status: str) -> None:
+    request = db.scalar(select(CatalogueRequest).where(CatalogueRequest.job_id == job_id))
+    if request is not None:
+        request.status = status
+
+
 def claim_one() -> UUID | None:
     with SessionLocal.begin() as db:
         job = db.scalar(
@@ -55,6 +71,8 @@ def claim_one() -> UUID | None:
         job.started_at = utcnow()
         job.claimed_at = utcnow()
         job.updated_at = utcnow()
+        sync_account_state_request(db, job.id, "running")
+        sync_catalogue_request(db, job.id, "running")
         add_event(db, job.id, "started", "Background worker started execution")
         return job.id
 
@@ -140,19 +158,39 @@ async def execute_job(job_id: UUID) -> None:
             return_code = 124 if timed_out else 1 if failed else 0
         else:
             with SessionLocal.begin() as db:
-                add_event(db, job_id, "connected", "Connecting to the registered target over WinRM HTTPS")
-                add_event(db, job_id, "script_executed", f"Running approved script {automation.powershell_script_key}")
-            result = await asyncio.to_thread(
-                execute_playbook,
-                automation,
-                server,
-                parameters,
-                min(automation.timeout_seconds, settings.ansible_job_timeout_seconds),
+                connection_mode = "HTTPS" if server.use_https else "HTTP with NTLM message encryption"
+                add_event(db, job_id, "connecting", f"Testing WinRM {connection_mode} connectivity")
+            connection_result = await asyncio.to_thread(
+                execute_playbook, connection_test_automation(), server, {}, 30
             )
-            return_code = int(result["return_code"])
+            connection_return_code = int(connection_result["return_code"])
+            if connection_return_code != 0:
+                return_code = connection_return_code
+                stdout = connection_result["stdout"]
+                stderr = connection_result["stderr"]
+                with SessionLocal.begin() as db:
+                    add_event(
+                        db,
+                        job_id,
+                        "connection_failed",
+                        "WinRM connection test failed; automation was not run.",
+                        {"return_code": return_code},
+                    )
+            else:
+                with SessionLocal.begin() as db:
+                    add_event(db, job_id, "connected", f"WinRM {connection_mode} connection established")
+                    add_event(db, job_id, "script_executed", f"Running approved script {automation.powershell_script_key}")
+                result = await asyncio.to_thread(
+                    execute_playbook,
+                    automation,
+                    server,
+                    parameters,
+                    min(automation.timeout_seconds, settings.ansible_job_timeout_seconds),
+                )
+                return_code = int(result["return_code"])
+                stdout = result["stdout"]
+                stderr = result["stderr"]
             status = "successful" if return_code == 0 else "timed_out" if return_code == 124 else "failed"
-            stdout = result["stdout"]
-            stderr = result["stderr"]
 
         completed = datetime.now(timezone.utc)
         duration_seconds = max(1, int((completed - started).total_seconds()))
@@ -169,6 +207,8 @@ async def execute_job(job_id: UUID) -> None:
             job.error_summary = None if status == "successful" else sanitize_text(stderr)
             job.mock_result = settings.mock_mode
             job.updated_at = completed
+            sync_account_state_request(db, job_id, status)
+            sync_catalogue_request(db, job_id, status)
             add_event(
                 db,
                 job_id,
@@ -191,6 +231,8 @@ async def execute_job(job_id: UUID) -> None:
                 job.sanitized_stderr = message
                 job.error_summary = message
                 job.updated_at = utcnow()
+                sync_account_state_request(db, job_id, "failed")
+                sync_catalogue_request(db, job_id, "failed")
                 add_event(db, job_id, "failed", message, {"mock": settings.mock_mode})
 
 

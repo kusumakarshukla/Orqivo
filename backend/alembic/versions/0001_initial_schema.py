@@ -12,7 +12,11 @@ depends_on = None
 def upgrade() -> None:
     # Base metadata is the canonical initial schema. Future revisions should
     # use explicit Alembic operations for incremental, reviewable changes.
-    Base.metadata.create_all(bind=op.get_bind())
+    initial_tables = [
+        table for table in Base.metadata.sorted_tables
+        if table.name not in {"account_state_requests", "catalogue_requests"}
+    ]
+    Base.metadata.create_all(bind=op.get_bind(), tables=initial_tables)
 
 
 def downgrade() -> None:

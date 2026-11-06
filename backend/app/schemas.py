@@ -1,8 +1,9 @@
-from datetime import datetime
-from typing import Any, Literal
+from datetime import date, datetime
+from ipaddress import ip_address
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 RoleName = Literal["admin", "operator", "viewer"]
@@ -47,9 +48,9 @@ class ServerInput(BaseModel):
     hostname: str = Field(min_length=1, max_length=253)
     environment: str = Field(min_length=1, max_length=64)
     operating_system: str = Field(min_length=1, max_length=120)
-    winrm_port: int = Field(ge=1, le=65535)
-    use_https: bool = True
-    certificate_validation: Literal["validate", "ignore"] = "validate"
+    winrm_port: Literal[5986] = 5986
+    use_https: Literal[True] = True
+    certificate_validation: Literal["validate"] = "validate"
     credential_reference: str = Field(min_length=1, max_length=160)
     is_active: bool = True
 
@@ -59,8 +60,12 @@ class ServerInput(BaseModel):
         import re
 
         if not re.fullmatch(r"[A-Za-z0-9.-]+", value) or value.startswith(".") or value.endswith("."):
-            raise ValueError("hostname must be a DNS name or IPv4 address")
-        return value
+            raise ValueError("hostname must be a DNS name")
+        try:
+            ip_address(value)
+        except ValueError:
+            return value
+        raise ValueError("hostname must be a DNS name matching the WinRM certificate, not an IP address")
 
 
 class JobInput(BaseModel):
@@ -71,6 +76,91 @@ class JobInput(BaseModel):
     business_reason: str = Field(min_length=3, max_length=1000)
     confirmed: Literal[True]
     simulate_failure: bool = False
+
+
+class AccountStateRequestInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    action: Literal["disable_ad_account", "enable_stale_account"]
+    sam_account_name: str = Field(
+        min_length=1,
+        max_length=20,
+        pattern=r"^[A-Za-z0-9._$-]+$",
+    )
+
+
+ParentCompany = Literal["DH-HQ", "DHCM", "DHAM", "DHE", "DHGS", "DHRE", "Merex"]
+Subcompany = Literal[
+    "DH-HQ", "EIT Business group", "Shamal", "Smart City", "SmartCity Kochi",
+    "SmartCity Malta", "DDA", "DHAM", "DIDI", "D-Marin", "Dubai Residential",
+    "TECOM Group", "Ejadah", "DH Entertainment", "Global Village", "DHRE",
+    "Merex Investments Group", "Idama", "Roxy Cinemas", "Green Planet Dubai",
+    "Sea Breeze", "DHI", "DHHAM", "ARN",
+]
+
+
+class CatalogueRequestBase(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_control_characters(cls, values: Any) -> Any:
+        if isinstance(values, dict):
+            for value in values.values():
+                if isinstance(value, str) and any(ord(char) < 32 and char not in "\t" for char in value):
+                    raise ValueError("Control characters are not allowed.")
+        return values
+
+
+class PermanentAccountRequestInput(CatalogueRequestBase):
+    catalogue: Literal["create_permanent_account"]
+    parent_company: ParentCompany
+    subcompany: Subcompany
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    middle_name: str = Field(default="", max_length=100)
+    line_manager_sam_account_name: str = Field(min_length=1, max_length=20, pattern=r"^[A-Za-z0-9._$-]+$")
+    date_of_joining: date
+    ticket_number: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._/-]+$")
+    office: str = Field(min_length=1, max_length=160)
+    job_title: str = Field(min_length=1, max_length=160)
+    department: str = Field(min_length=1, max_length=160)
+    mobile: str = Field(min_length=7, max_length=30, pattern=r"^[0-9+(). -]+$")
+    staff_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._/-]+$")
+    last_working_day: date
+    account_type: Literal["Permanent", "Temporary"]
+
+
+class ConsultantAccountRequestInput(CatalogueRequestBase):
+    catalogue: Literal["create_consultant_account"]
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
+    middle_name: str = Field(default="", max_length=100)
+    last_working_day: date
+    line_manager_sam: str = Field(min_length=1, max_length=20, pattern=r"^[A-Za-z0-9._$-]+$")
+    date_of_joining: date
+    ticket_number: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._/-]+$")
+    office: str = Field(min_length=1, max_length=160)
+    job_title: str = Field(min_length=1, max_length=160)
+    department: str = Field(min_length=1, max_length=160)
+    mobile: str = Field(min_length=7, max_length=30, pattern=r"^[0-9+(). -]+$")
+    account_type: Literal["Consultant", "Vendor"]
+    parent_company: ParentCompany
+    subcompany: Subcompany
+
+
+class BitlockerKeyRequestInput(CatalogueRequestBase):
+    catalogue: Literal["bitlocker_key_retrieval"]
+    device_name: str = Field(min_length=1, max_length=253, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    ticket_number: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._/-]+$")
+    requester_email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    sd_agent_email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+CatalogueRequestInput = Annotated[
+    PermanentAccountRequestInput | ConsultantAccountRequestInput | BitlockerKeyRequestInput,
+    Field(discriminator="catalogue"),
+]
 
 
 class StatusInput(BaseModel):

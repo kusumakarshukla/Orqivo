@@ -21,6 +21,7 @@
     - name: Run the registered PowerShell service script
       ansible.windows.win_powershell:
         path: C:\Automation\Restart-WindowsService.ps1
+        remote_src: true
         parameters:
           ServiceName: "{{ service_name }}"
           ChangeNumber: "{{ change_number }}"

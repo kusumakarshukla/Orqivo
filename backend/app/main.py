@@ -1,20 +1,27 @@
+import base64
 import csv
+import hashlib
+import hmac
 import io
 import json
 import logging
 import secrets
 import time
 from contextlib import asynccontextmanager
+from calendar import monthrange
 from datetime import datetime, timedelta, timezone
+from ipaddress import ip_address
 from typing import Any, Annotated
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import and_, func, or_, select
+from fastapi.responses import RedirectResponse
+from pydantic import TypeAdapter, ValidationError
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
-from app.ansible_runner import PLAYBOOK_REGISTRY, SCRIPT_REGISTRY, execute_playbook
+from app.ansible_runner import PLAYBOOK_REGISTRY, SCRIPT_REGISTRY, connection_test_automation, execute_playbook
 from app.core.config import settings
 from app.core.security import (
     digest_token,
@@ -24,8 +31,10 @@ from app.core.security import (
     verify_password,
 )
 from app.db.models import (
+    AccountStateRequest,
     AuditLog,
     AutomationDefinition,
+    CatalogueRequest,
     Job,
     JobEvent,
     Role,
@@ -37,8 +46,10 @@ from app.db.models import (
 )
 from app.db.session import SessionLocal, get_db
 from app.schemas import (
+    AccountStateRequestInput,
     AuditFilter,
     AutomationInput,
+    CatalogueRequestInput,
     JobInput,
     LoginInput,
     ServerInput,
@@ -66,6 +77,19 @@ logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.I
 logger = logging.getLogger("windows_automation.api")
 LOGIN_BUCKETS: dict[str, tuple[int, float]] = {}
 SUBMISSION_BUCKETS: dict[str, tuple[int, float]] = {}
+ACCOUNT_REQUEST_BUCKETS: dict[str, tuple[int, float]] = {}
+CATALOGUE_REQUEST_BUCKETS: dict[str, tuple[int, float]] = {}
+SSO_STATE_COOKIE = "wap_sso_state"
+ACCOUNT_CREATION_CATALOGUES = frozenset({"create_permanent_account", "create_consultant_account"})
+REAL_MODE_READ_ONLY_AUTOMATIONS = frozenset({
+    "test_windows_connection",
+    "get_server_health",
+    "get_disk_space",
+})
+
+
+def is_localhost_cookie_host(hostname: str | None) -> bool:
+    return (hostname or "").lower() in {"localhost", "127.0.0.1", "::1", "[::1]"}
 
 
 def as_user(user: User) -> dict[str, Any]:
@@ -194,6 +218,253 @@ def limited(store: dict[str, tuple[int, float]], key: str, limit: int, period: f
     return count + 1 <= limit
 
 
+def _sso_cookie_secure(request: Request) -> bool:
+    return settings.app_env == "production" and not is_localhost_cookie_host(request.url.hostname)
+
+
+def _sign_sso_flow(flow: dict[str, Any]) -> str:
+    flow_data = {key: value for key, value in flow.items() if key != "auth_uri"}
+    payload = json.dumps({"issued_at": int(time.time()), "flow": flow_data}, separators=(",", ":")).encode()
+    encoded = base64.urlsafe_b64encode(payload).decode().rstrip("=")
+    signature = hmac.new(settings.csrf_secret.encode(), encoded.encode(), hashlib.sha256).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def _read_sso_flow(cookie: str) -> dict[str, Any]:
+    try:
+        encoded, signature = cookie.rsplit(".", 1)
+        expected = hmac.new(settings.csrf_secret.encode(), encoded.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            raise ValueError("Invalid SSO state signature.")
+        payload = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        value = json.loads(payload)
+        issued_at = int(value["issued_at"])
+        if issued_at > int(time.time()) + 30 or time.time() - issued_at > 600:
+            raise ValueError("SSO state has expired.")
+        flow = value["flow"]
+        if not isinstance(flow, dict) or not flow.get("state") or not flow.get("nonce"):
+            raise ValueError("SSO state is incomplete.")
+        return flow
+    except (KeyError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError("Invalid SSO state cookie.") from exc
+
+
+def _azure_sso_client():
+    if not settings.azure_sso_enabled:
+        raise HTTPException(status_code=404, detail="Azure SSO is not configured.")
+    import msal
+
+    return msal.ConfidentialClientApplication(
+        settings.azure_sso_client_id,
+        authority=f"https://login.microsoftonline.com/{settings.azure_sso_tenant_id}",
+        client_credential=settings.azure_sso_client_secret,
+    )
+
+
+def _sso_failure_redirect(code: str, request: Request) -> RedirectResponse:
+    response = RedirectResponse(
+        f"{settings.frontend_url.rstrip('/')}/login?sso_error={code}",
+        status_code=303,
+    )
+    response.delete_cookie(
+        SSO_STATE_COOKIE,
+        path="/",
+        secure=_sso_cookie_secure(request),
+        samesite="lax",
+    )
+    return response
+
+
+def _role_from_sso_groups(groups: object) -> str | None:
+    if not isinstance(groups, list):
+        return None
+    memberships = {value.lower() for value in groups if isinstance(value, str)}
+    for role in ("admin", "operator", "viewer"):
+        configured_id = getattr(settings, f"azure_sso_{role}_group_id")
+        if configured_id and configured_id.strip().lower() in memberships:
+            return role
+    return None
+
+
+def _establish_user_session(
+    user: User,
+    request: Request,
+    response: Response,
+    db: Session,
+    auth_method: str,
+) -> dict[str, Any]:
+    token = secrets.token_urlsafe(48)
+    csrf = secrets.token_urlsafe(32)
+    expires = utcnow() + timedelta(hours=8)
+    db.add(UserSession(
+        user_id=user.id,
+        token_hash=digest_token(token),
+        csrf_hash=digest_token(csrf),
+        expires_at=expires,
+    ))
+    user.last_login_at = utcnow()
+    add_audit(db, request, user.id, "login", "user", str(user.id), {"method": auth_method, "email": user.email})
+    db.commit()
+    secure_cookie = _sso_cookie_secure(request)
+    response.set_cookie(
+        "wap_session", token, httponly=True, secure=secure_cookie,
+        samesite="lax", path="/", expires=expires,
+    )
+    response.set_cookie(
+        "wap_csrf", csrf, httponly=False, secure=secure_cookie,
+        samesite="lax", path="/", expires=expires,
+    )
+    return as_user(user)
+
+
+def worker_is_online(db: Session) -> bool:
+    heartbeat = db.get(WorkerHeartbeat, 1)
+    return bool(heartbeat and (utcnow() - heartbeat.last_seen_at).total_seconds() < 15)
+
+
+def configured_ad_account_test_server(db: Session) -> Server | None:
+    server_name = settings.ad_account_state_test_server_name
+    if not server_name:
+        return None
+    server = db.scalar(select(Server).where(Server.name == server_name))
+    if (
+        server is None
+        or not server.is_active
+        or server.environment.casefold() not in {"development", "test"}
+    ):
+        return None
+    try:
+        ip_address(server.hostname)
+    except ValueError:
+        pass
+    else:
+        return None
+
+    if server.use_https:
+        return server if server.winrm_port == 5986 and server.certificate_validation == "validate" else None
+    return (
+        server
+        if settings.ad_account_state_test_allow_http
+        and settings.windows_winrm_transport.casefold() == "ntlm"
+        and server.winrm_port == 5985
+        else None
+    )
+
+
+def get_ad_account_test_automation(db: Session) -> AutomationDefinition:
+    automation = db.scalar(
+        select(AutomationDefinition).where(AutomationDefinition.code == "disable_ad_account")
+    )
+    if automation is None:
+        automation = AutomationDefinition(
+            code="disable_ad_account",
+            name="Disable AD Account",
+            description="Disable and verify an account on the configured non-production AD test target.",
+            playbook_key="disable_ad_account",
+            powershell_script_key="disable_ad_account",
+            parameter_schema=[{
+                "name": "sam_account_name",
+                "label": "SamAccountName",
+                "type": "text",
+                "required": True,
+                "options": [],
+            }],
+            risk_level="high",
+            timeout_seconds=180,
+            required_role="operator",
+            requires_change_number=False,
+            requires_confirmation=True,
+            is_active=True,
+            target_os="Windows Server",
+            expected_minutes=2,
+        )
+        db.add(automation)
+        db.flush()
+    return automation
+
+
+def queue_catalogue_account_creation(
+    db: Session,
+    row: CatalogueRequest,
+    user: User,
+    request: Request,
+    audit_action: str,
+) -> Job:
+    if row.catalogue not in ACCOUNT_CREATION_CATALOGUES:
+        raise HTTPException(status_code=400, detail="This catalogue cannot be executed as an account creation.")
+    if not settings.ad_account_state_test_mode:
+        raise HTTPException(status_code=503, detail="Non-production account creation is not enabled.")
+    if settings.mock_mode or not settings.ansible_enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="Non-production account creation requires MOCK_MODE=false and ANSIBLE_ENABLED=true.",
+        )
+    server = configured_ad_account_test_server(db)
+    if server is None:
+        raise HTTPException(
+            status_code=503,
+            detail="The account-creation target must be an active registered development/test DNS host using the approved WinRM transport.",
+        )
+    if not settings.ad_demo_ou_dn:
+        raise HTTPException(status_code=503, detail="The non-production account-creation OU is not configured.")
+    if not worker_is_online(db):
+        raise HTTPException(status_code=503, detail="Automation worker is unavailable; the request was not queued.")
+
+    try:
+        validated_request = TypeAdapter(CatalogueRequestInput).validate_python({
+            "catalogue": row.catalogue,
+            **(row.request_data or {}),
+        })
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Stored account-creation request details failed validation; the request was not queued.",
+        ) from exc
+
+    automation = db.scalar(
+        select(AutomationDefinition).where(AutomationDefinition.code == "create_ad_account")
+    )
+    if (
+        automation is None
+        or not automation.is_active
+        or automation.playbook_key not in PLAYBOOK_REGISTRY
+        or automation.powershell_script_key not in SCRIPT_REGISTRY
+        or automation.playbook_key != "create_ad_account"
+        or automation.powershell_script_key != "create_ad_account"
+    ):
+        raise HTTPException(status_code=503, detail="The approved demo account-creation automation is unavailable.")
+
+    job = Job(
+        automation_definition_id=automation.id,
+        server_id=server.id,
+        requested_by_user_id=user.id,
+        status="pending",
+        parameters_json=validated_request.model_dump(mode="json", exclude={"catalogue"}),
+        business_reason="Create account in the Active Directory",
+        mock_result=False,
+    )
+    db.add(job)
+    db.flush()
+    row.job_id = job.id
+    row.status = "queued"
+    add_event(db, job.id, "submitted", "Non-production account-creation automation submitted", {
+        "automation": automation.code,
+        "server": server.name,
+        "mock": False,
+    })
+    add_event(db, job.id, "validated", "Request and target passed non-production validation")
+    add_audit(
+        db,
+        request,
+        user.id,
+        audit_action,
+        "catalogue_request",
+        str(row.id),
+        {"catalogue": row.catalogue, "job_id": str(job.id)},
+    )
+    return job
+
+
 def validate_parameters(automation: AutomationDefinition, values: dict[str, Any]) -> str | None:
     schema = automation.parameter_schema or []
     approved = {item["name"]: item for item in schema}
@@ -255,9 +526,14 @@ app = FastAPI(
     openapi_url="/api/openapi.json" if settings.enable_api_docs and settings.app_env != "production" else None,
     lifespan=lifespan,
 )
+allowed_origins = [
+    origin.strip().rstrip("/")
+    for origin in (settings.allowed_origins or settings.frontend_url).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-CSRF-Token", "X-Correlation-ID"],
@@ -268,7 +544,7 @@ app.add_middleware(
 async def security_and_request_logging(request: Request, call_next):
     correlation_id = request.headers.get("x-correlation-id") or str(uuid4())
     origin = request.headers.get("origin")
-    if origin and origin != settings.frontend_url:
+    if origin and origin not in allowed_origins:
         return Response(content='{"error":"Request origin is not allowed"}', status_code=403, media_type="application/json")
     if request.method not in {"GET", "HEAD", "OPTIONS"} and not request.url.path.endswith("/auth/login"):
         csrf_header = request.headers.get("x-csrf-token")
@@ -306,15 +582,131 @@ def health() -> dict[str, str]:
 def ready(db: Session = Depends(get_db)) -> dict[str, Any]:
     try:
         db.execute(select(1))
-        heartbeat = db.get(WorkerHeartbeat, 1)
-        worker_online = bool(heartbeat and (utcnow() - heartbeat.last_seen_at).total_seconds() < 15)
-        if not worker_online:
+        if not worker_is_online(db):
             raise HTTPException(status_code=503, detail="Worker is unavailable")
-        return {"status": "ready", "database": "connected", "worker_online": True, "mock_mode": settings.mock_mode}
+        return {
+            "status": "ready",
+            "database": "connected",
+            "worker_online": True,
+            "mock_mode": settings.mock_mode,
+            "ansible_enabled": settings.ansible_enabled,
+        }
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Database is unavailable") from exc
+
+
+@app.get("/api/v1/auth/options")
+def auth_options() -> dict[str, bool]:
+    return {"azure_sso_enabled": settings.azure_sso_enabled}
+
+
+@app.get("/api/v1/auth/sso/login")
+def azure_sso_login(request: Request) -> RedirectResponse:
+    client = _azure_sso_client()
+    if settings.app_env == "production" and not (settings.azure_sso_redirect_uri or "").startswith("https://"):
+        raise HTTPException(status_code=503, detail="Azure SSO requires an HTTPS callback URL in production.")
+    flow = client.initiate_auth_code_flow(
+        scopes=["openid", "profile", "email"],
+        redirect_uri=settings.azure_sso_redirect_uri,
+        response_mode="query",
+    )
+    if flow.get("error") or not flow.get("auth_uri"):
+        logger.error("Could not initialize Azure SSO authorization flow")
+        raise HTTPException(status_code=503, detail="Azure SSO could not be initialized.")
+    response = RedirectResponse(flow["auth_uri"], status_code=302)
+    response.set_cookie(
+        SSO_STATE_COOKIE,
+        _sign_sso_flow(flow),
+        httponly=True,
+        secure=_sso_cookie_secure(request),
+        samesite="lax",
+        path="/",
+        max_age=600,
+    )
+    return response
+
+
+@app.get("/api/v1/auth/sso/callback")
+def azure_sso_callback(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    response = _sso_failure_redirect("authentication_failed", request)
+    signed_flow = request.cookies.get(SSO_STATE_COOKIE)
+    if not signed_flow or not settings.azure_sso_enabled:
+        return response
+    try:
+        flow = _read_sso_flow(signed_flow)
+        client = _azure_sso_client()
+        result = client.acquire_token_by_auth_code_flow(flow, dict(request.query_params))
+        claims = result.get("id_token_claims") if isinstance(result, dict) else None
+        if not isinstance(claims, dict):
+            logger.warning("Azure SSO callback returned no validated identity claims")
+            return response
+        tenant_claim = claims.get("tid")
+        if not isinstance(tenant_claim, str) or tenant_claim.lower() != settings.azure_sso_tenant_id.lower():
+            logger.warning("Azure SSO callback tenant did not match configured tenant")
+            return response
+        if claims.get("aud") != settings.azure_sso_client_id:
+            logger.warning("Azure SSO callback audience did not match configured client")
+            return response
+        if "groups" in claims.get("_claim_names", {}) or claims.get("hasgroups"):
+            logger.warning("Azure SSO group overage requires a smaller group claim set")
+            return response
+        role_name = _role_from_sso_groups(claims.get("groups"))
+        if not role_name:
+            logger.warning("Azure SSO user did not match a configured portal role group")
+            return _sso_failure_redirect("not_authorized", request)
+        email = claims.get("preferred_username") or claims.get("email") or claims.get("upn")
+        if not isinstance(email, str) or not email.strip() or len(email) > 320:
+            logger.warning("Azure SSO identity did not contain a usable email or UPN")
+            return response
+        email = email.strip().lower()
+        role = db.scalar(select(Role).where(Role.name == role_name))
+        if role is None:
+            logger.error("Configured Azure SSO role is missing from the database")
+            return response
+        user = db.scalar(
+            select(User).options(joinedload(User.role)).where(func.lower(User.email) == email)
+        )
+        if user is not None and not user.is_active:
+            logger.warning("Azure SSO login rejected for inactive portal user")
+            return _sso_failure_redirect("not_authorized", request)
+        full_name = claims.get("name")
+        if not isinstance(full_name, str) or not full_name.strip():
+            full_name = email
+        if user is None:
+            user = User(
+                email=email,
+                full_name=full_name.strip()[:160],
+                password_hash=hash_password(secrets.token_urlsafe(64)),
+                role=role,
+            )
+            db.add(user)
+            db.flush()
+        else:
+            user.role = role
+            user.full_name = full_name.strip()[:160]
+        result_response = RedirectResponse(
+            f"{settings.frontend_url.rstrip('/')}/dashboard",
+            status_code=303,
+        )
+        result_response.delete_cookie(
+            SSO_STATE_COOKIE,
+            path="/",
+            secure=_sso_cookie_secure(request),
+            samesite="lax",
+        )
+        _establish_user_session(user, request, result_response, db, "azure_sso")
+        return result_response
+    except (ValueError, KeyError, TypeError):
+        logger.warning("Azure SSO callback state or response was invalid")
+        return response
+    except Exception:
+        logger.exception("Azure SSO callback failed")
+        return response
 
 
 @app.post("/api/v1/auth/login")
@@ -331,27 +723,7 @@ def login(body: dict, request: Request, response: Response, db: Session = Depend
     )
     if user is None or not user.is_active or not verify_password(parsed.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Email or password is incorrect")
-    token = secrets.token_urlsafe(48)
-    csrf = secrets.token_urlsafe(32)
-    expires = utcnow() + timedelta(hours=8)
-    db.add(UserSession(
-        user_id=user.id,
-        token_hash=digest_token(token),
-        csrf_hash=digest_token(csrf),
-        expires_at=expires,
-    ))
-    user.last_login_at = utcnow()
-    add_audit(db, request, user.id, "login", "user", str(user.id), {"email": user.email})
-    db.commit()
-    response.set_cookie(
-        "wap_session", token, httponly=True, secure=settings.app_env == "production",
-        samesite="lax", path="/", expires=expires,
-    )
-    response.set_cookie(
-        "wap_csrf", csrf, httponly=False, secure=settings.app_env == "production",
-        samesite="lax", path="/", expires=expires,
-    )
-    return as_user(user)
+    return _establish_user_session(user, request, response, db, "password")
 
 
 @app.post("/api/v1/auth/logout", status_code=204)
@@ -363,8 +735,9 @@ def logout(request: Request, response: Response, user: User = Depends(get_authen
             db.delete(session)
     add_audit(db, request, user.id, "logout", "user", str(user.id))
     db.commit()
-    response.delete_cookie("wap_session", path="/", secure=settings.app_env == "production", samesite="lax")
-    response.delete_cookie("wap_csrf", path="/", secure=settings.app_env == "production", samesite="lax")
+    secure_cookie = settings.app_env == "production" and not is_localhost_cookie_host(request.url.hostname)
+    response.delete_cookie("wap_session", path="/", secure=secure_cookie, samesite="lax")
+    response.delete_cookie("wap_csrf", path="/", secure=secure_cookie, samesite="lax")
     response.status_code = 204
     return response
 
@@ -381,13 +754,137 @@ def dashboard_summary(_: User = Depends(get_authenticated_user), db: Session = D
     total = sum(counts.values())
     successful = counts.get("successful", 0)
     completed = successful + counts.get("failed", 0) + counts.get("timed_out", 0)
-    heartbeat = db.get(WorkerHeartbeat, 1)
-    worker_online = bool(heartbeat and (utcnow() - heartbeat.last_seen_at).total_seconds() < 15)
+    worker_online = worker_is_online(db)
     return {
         "total": total, "running": counts.get("running", 0), "successful": successful,
         "failed": counts.get("failed", 0),
         "success_rate": round(100 * successful / completed, 1) if completed else 0,
-        "mock_mode": settings.mock_mode, "worker_online": worker_online, "by_status": counts,
+        "mock_mode": settings.mock_mode,
+        "ansible_enabled": settings.ansible_enabled,
+        "worker_online": worker_online,
+        "by_status": counts,
+    }
+
+
+@app.get("/api/v1/admin/automation-tracker")
+def automation_tracker(
+    year: int = Query(ge=2000, le=2100),
+    month: int = Query(ge=1, le=12),
+    _: User = Depends(role_dependency("admin")),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    month_start = datetime(year, month, 1, tzinfo=timezone.utc)
+    if month == 12:
+        month_end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        month_end = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+    year_start = datetime(year, 1, 1, tzinfo=timezone.utc)
+    completed_statuses = ("successful", "failed", "timed_out")
+    completed_count = func.sum(case((Job.status.in_(completed_statuses), 1), else_=0))
+    success_count = func.sum(case((Job.status == "successful", 1), else_=0))
+    failure_count = func.sum(case((Job.status.in_(("failed", "timed_out")), 1), else_=0))
+    cancelled_count = func.sum(case((Job.status == "cancelled", 1), else_=0))
+    average_duration = func.avg(case(
+        (Job.status.in_(completed_statuses), Job.duration_seconds),
+        else_=None,
+    ))
+
+    def job_metrics(start: datetime, end: datetime) -> dict[str, Any]:
+        total, successful, failed, cancelled, average = db.execute(
+            select(
+                completed_count,
+                success_count,
+                failure_count,
+                cancelled_count,
+                average_duration,
+            ).where(Job.submitted_at >= start, Job.submitted_at < end)
+        ).one()
+        return {
+            "total_executed": int(total or 0),
+            "successful": int(successful or 0),
+            "failed": int(failed or 0),
+            "cancelled": int(cancelled or 0),
+            "success_rate": round(100 * int(successful or 0) / int(total or 1), 1),
+            "failure_rate": round(100 * int(failed or 0) / int(total or 1), 1),
+            "average_duration_seconds": round(float(average), 1) if average is not None else None,
+        }
+
+    month_metrics = job_metrics(month_start, month_end)
+    ytd_metrics = job_metrics(year_start, month_end)
+
+    job_day = func.date_trunc("day", Job.submitted_at).label("request_day")
+    job_daily = db.execute(
+        select(job_day, func.count(Job.id))
+        .where(Job.submitted_at >= month_start, Job.submitted_at < month_end)
+        .group_by(job_day)
+    ).all()
+    account_request_day = func.date_trunc("day", AccountStateRequest.submitted_at).label("request_day")
+    request_daily = db.execute(
+        select(account_request_day, func.count(AccountStateRequest.id))
+        .where(AccountStateRequest.submitted_at >= month_start, AccountStateRequest.submitted_at < month_end)
+        .group_by(account_request_day)
+    ).all()
+    catalogue_request_day = func.date_trunc("day", CatalogueRequest.submitted_at).label("request_day")
+    catalogue_daily = db.execute(
+        select(catalogue_request_day, func.count(CatalogueRequest.id))
+        .where(CatalogueRequest.submitted_at >= month_start, CatalogueRequest.submitted_at < month_end)
+        .group_by(catalogue_request_day)
+    ).all()
+    daily_counts: dict[str, dict[str, int]] = {}
+    for day, count in job_daily:
+        daily_counts.setdefault(day.date().isoformat(), {"job_requests": 0, "account_requests": 0, "catalogue_requests": 0})["job_requests"] = int(count)
+    for day, count in request_daily:
+        daily_counts.setdefault(day.date().isoformat(), {"job_requests": 0, "account_requests": 0, "catalogue_requests": 0})["account_requests"] = int(count)
+    for day, count in catalogue_daily:
+        daily_counts.setdefault(day.date().isoformat(), {"job_requests": 0, "account_requests": 0, "catalogue_requests": 0})["catalogue_requests"] = int(count)
+
+    daily = []
+    for day in range(1, monthrange(year, month)[1] + 1):
+        day_key = f"{year:04d}-{month:02d}-{day:02d}"
+        counts = daily_counts.get(day_key, {"job_requests": 0, "account_requests": 0, "catalogue_requests": 0})
+        daily.append({
+            "date": day_key,
+            **counts,
+            "total_requests": counts["job_requests"] + counts["account_requests"] + counts["catalogue_requests"],
+        })
+
+    top_catalogues = db.execute(
+        select(
+            AutomationDefinition.code,
+            AutomationDefinition.name,
+            func.count(Job.id),
+            func.sum(case((Job.status == "successful", 1), else_=0)),
+            func.sum(case((Job.status.in_(("failed", "timed_out")), 1), else_=0)),
+        )
+        .join(Job, Job.automation_definition_id == AutomationDefinition.id)
+        .where(
+            Job.submitted_at >= month_start,
+            Job.submitted_at < month_end,
+            Job.status.in_(completed_statuses),
+        )
+        .group_by(AutomationDefinition.code, AutomationDefinition.name)
+        .order_by(func.count(Job.id).desc(), AutomationDefinition.name)
+        .limit(5)
+    ).all()
+
+    return {
+        "year": year,
+        "month": month,
+        "month_label": month_start.strftime("%B %Y"),
+        "total_requests": sum(item["total_requests"] for item in daily),
+        **month_metrics,
+        "ytd": ytd_metrics,
+        "daily": daily,
+        "top_catalogues": [
+            {
+                "code": code,
+                "name": name,
+                "total_executed": int(total),
+                "successful": int(successful or 0),
+                "failed": int(failed or 0),
+            }
+            for code, name, total, successful, failed in top_catalogues
+        ],
     }
 
 
@@ -441,6 +938,213 @@ def validate_automation_registration(body: AutomationInput) -> None:
         raise HTTPException(status_code=400, detail="Playbook key is not registered")
     if body.powershell_script_key not in SCRIPT_REGISTRY or body.playbook_key != body.powershell_script_key:
         raise HTTPException(status_code=400, detail="PowerShell script key is not registered for this playbook")
+
+
+@app.post("/api/v1/account-state-requests", status_code=202)
+def create_account_state_request(
+    body: AccountStateRequestInput,
+    request: Request,
+    user: User = Depends(role_dependency("operator", "admin")),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    if not limited(ACCOUNT_REQUEST_BUCKETS, str(user.id), 10, 3600):
+        raise HTTPException(status_code=429, detail="Request submission limit reached")
+
+    test_automation_enabled = (
+        body.action == "disable_ad_account"
+        and settings.ad_account_state_test_mode
+    )
+    job: Job | None = None
+    if test_automation_enabled:
+        if settings.mock_mode or not settings.ansible_enabled:
+            raise HTTPException(
+                status_code=503,
+                detail="Non-production AD test execution requires MOCK_MODE=false and ANSIBLE_ENABLED=true.",
+            )
+        server = configured_ad_account_test_server(db)
+        if server is None:
+            raise HTTPException(
+                status_code=503,
+                detail="The AD test target must be a registered development/test DNS host using validated HTTPS/5986 or explicitly enabled NTLM-protected HTTP/5985.",
+            )
+        if not worker_is_online(db):
+            raise HTTPException(status_code=503, detail="Automation worker is unavailable; the request was not queued.")
+        automation = get_ad_account_test_automation(db)
+        job = Job(
+            automation_definition_id=automation.id,
+            server_id=server.id,
+            requested_by_user_id=user.id,
+            status="pending",
+            parameters_json={"sam_account_name": body.sam_account_name},
+            business_reason="Disable account on configured non-production test target",
+            mock_result=False,
+        )
+        db.add(job)
+        db.flush()
+        add_event(db, job.id, "submitted", "Non-production AD test automation submitted", {
+            "automation": automation.code,
+            "server": server.name,
+            "mock": False,
+        })
+        add_event(db, job.id, "validated", "Target and SamAccountName passed non-production validation")
+
+    row = AccountStateRequest(
+        action=body.action,
+        sam_account_name=body.sam_account_name,
+        requested_by_user_id=user.id,
+        job_id=job.id if job is not None else None,
+        status="queued" if test_automation_enabled else "awaiting_automation_integration",
+    )
+    db.add(row)
+    db.flush()
+    add_audit(
+        db,
+        request,
+        user.id,
+        "account_state_request_submitted",
+        "account_state_request",
+        str(row.id),
+        {"action": row.action, "job_id": str(row.job_id) if row.job_id else None},
+    )
+    db.commit()
+    db.refresh(row)
+    return {
+        "id": str(row.id),
+        "action": row.action,
+        "status": row.status,
+        "job_id": str(row.job_id) if row.job_id else None,
+        "submitted_at": row.submitted_at.isoformat(),
+    }
+
+
+@app.get("/api/v1/account-state-requests")
+def list_account_state_requests(
+    user: User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    query = (
+        select(AccountStateRequest, User.full_name)
+        .join(User, AccountStateRequest.requested_by_user_id == User.id)
+        .order_by(AccountStateRequest.submitted_at.desc())
+        .limit(100)
+    )
+    if user.role.name != "admin":
+        query = query.where(AccountStateRequest.requested_by_user_id == user.id)
+    return [
+        {
+            "id": str(row.id),
+            "action": row.action,
+            "sam_account_name": row.sam_account_name,
+            "status": row.status,
+            "job_id": str(row.job_id) if row.job_id else None,
+            "submitted_at": row.submitted_at.isoformat(),
+            "requested_by": requester_name,
+        }
+        for row, requester_name in db.execute(query).all()
+    ]
+
+
+@app.post("/api/v1/catalogue-requests", status_code=202)
+def create_catalogue_request(
+    body: CatalogueRequestInput,
+    request: Request,
+    user: User = Depends(role_dependency("operator", "admin")),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    if not limited(CATALOGUE_REQUEST_BUCKETS, str(user.id), 10, 3600):
+        raise HTTPException(status_code=429, detail="Request submission limit reached")
+
+    row = CatalogueRequest(
+        catalogue=body.catalogue,
+        request_data=body.model_dump(mode="json", exclude={"catalogue"}),
+        requested_by_user_id=user.id,
+    )
+    db.add(row)
+    db.flush()
+    if row.catalogue in ACCOUNT_CREATION_CATALOGUES and settings.ad_account_state_test_mode:
+        queue_catalogue_account_creation(
+            db, row, user, request, "catalogue_account_creation_queued"
+        )
+    else:
+        add_audit(
+            db,
+            request,
+            user.id,
+            "catalogue_request_submitted",
+            "catalogue_request",
+            str(row.id),
+            {"catalogue": row.catalogue},
+        )
+    db.commit()
+    db.refresh(row)
+    return {
+        "id": str(row.id),
+        "catalogue": row.catalogue,
+        "status": row.status,
+        "job_id": str(row.job_id) if row.job_id else None,
+        "submitted_at": row.submitted_at.isoformat(),
+    }
+
+
+@app.post("/api/v1/catalogue-requests/{request_id}/execute", status_code=202)
+def execute_catalogue_request(
+    request_id: UUID,
+    request: Request,
+    user: User = Depends(role_dependency("operator", "admin")),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    if not limited(CATALOGUE_REQUEST_BUCKETS, str(user.id), 10, 3600):
+        raise HTTPException(status_code=429, detail="Request submission limit reached")
+
+    row = db.scalar(
+        select(CatalogueRequest)
+        .where(CatalogueRequest.id == request_id)
+        .with_for_update()
+    )
+    if row is None or (user.role.name != "admin" and row.requested_by_user_id != user.id):
+        raise HTTPException(status_code=404, detail="Catalogue request not found")
+    if row.job_id is not None or row.status != "submitted_for_review":
+        raise HTTPException(status_code=409, detail="This request is not available for execution.")
+
+    job = queue_catalogue_account_creation(
+        db, row, user, request, "catalogue_account_creation_queued"
+    )
+    db.commit()
+    db.refresh(row)
+    return {
+        "id": str(row.id),
+        "catalogue": row.catalogue,
+        "status": row.status,
+        "job_id": str(job.id),
+        "submitted_at": row.submitted_at.isoformat(),
+    }
+
+
+@app.get("/api/v1/catalogue-requests")
+def list_catalogue_requests(
+    user: User = Depends(get_authenticated_user),
+    db: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    query = (
+        select(CatalogueRequest, User.full_name)
+        .join(User, CatalogueRequest.requested_by_user_id == User.id)
+        .order_by(CatalogueRequest.submitted_at.desc())
+        .limit(100)
+    )
+    if user.role.name != "admin":
+        query = query.where(CatalogueRequest.requested_by_user_id == user.id)
+    return [
+        {
+            "id": str(row.id),
+            "catalogue": row.catalogue,
+            "request_data": row.request_data,
+            "status": row.status,
+            "job_id": str(row.job_id) if row.job_id else None,
+            "submitted_at": row.submitted_at.isoformat(),
+            "requested_by": requester_name,
+        }
+        for row, requester_name in db.execute(query).all()
+    ]
 
 
 @app.post("/api/v1/automations", status_code=201)
@@ -591,23 +1295,7 @@ async def test_server_connection(
         success = True
         message = "Mock connection successful. No Windows server was contacted."
     else:
-        from app.db.models import AutomationDefinition
-
-        test_automation = AutomationDefinition(
-            playbook_key="test_windows_connection",
-            powershell_script_key="test_windows_connection",
-            code="test_windows_connection",
-            name="Test Windows Connection",
-            description="Internal connection test",
-            parameter_schema=[],
-            risk_level="low",
-            timeout_seconds=30,
-            required_role="admin",
-            requires_change_number=False,
-            requires_confirmation=False,
-            is_active=True,
-        )
-        result = await __import__("asyncio").to_thread(execute_playbook, test_automation, server, {}, 30)
+        result = await __import__("asyncio").to_thread(execute_playbook, connection_test_automation(), server, {}, 30)
         success = result["return_code"] == 0
         message = "WinRM HTTPS connection succeeded." if success else "WinRM connection failed. Review the sanitized server-side logs."
     server.last_connection_status = "success" if success else "failed"
@@ -630,8 +1318,21 @@ def create_job(
     server = db.get(Server, body.server_id)
     if automation is None or not automation.is_active or automation.playbook_key not in PLAYBOOK_REGISTRY or automation.powershell_script_key not in SCRIPT_REGISTRY:
         raise HTTPException(status_code=400, detail="Automation is inactive or not approved")
+    if not settings.mock_mode and (
+        automation.code not in REAL_MODE_READ_ONLY_AUTOMATIONS
+        or automation.playbook_key not in REAL_MODE_READ_ONLY_AUTOMATIONS
+        or automation.powershell_script_key not in REAL_MODE_READ_ONLY_AUTOMATIONS
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Only approved read-only automations are enabled for the initial live rollout.",
+        )
     if server is None or not server.is_active:
         raise HTTPException(status_code=400, detail="Target server is inactive or unavailable")
+    if not worker_is_online(db):
+        raise HTTPException(status_code=503, detail="Automation worker is unavailable; the job was not queued.")
+    if not settings.mock_mode and not settings.ansible_enabled:
+        raise HTTPException(status_code=503, detail="Live Ansible execution is disabled on this deployment.")
     error = validate_parameters(automation, body.parameters)
     if error:
         raise HTTPException(status_code=400, detail=error)
@@ -725,8 +1426,15 @@ def list_jobs(
         ))
     where = and_(*conditions) if conditions else True
     total = db.scalar(select(func.count(Job.id)).where(where)) or 0
-    order = Job.submitted_at.asc() if sort == "oldest" else Job.submitted_at.desc()
-    rows = db.scalars(job_query_for_user(user).where(*conditions).order_by(order).offset((page - 1) * page_size).limit(page_size)).unique().all()
+    execution_time = func.coalesce(Job.started_at, Job.submitted_at)
+    order = execution_time.asc() if sort == "oldest" else execution_time.desc()
+    rows = db.scalars(
+        job_query_for_user(user)
+        .where(*conditions)
+        .order_by(order, Job.submitted_at.desc(), Job.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).unique().all()
     return {"items": [as_job(row) for row in rows], "total": int(total), "page": page, "page_size": page_size}
 
 
@@ -739,14 +1447,19 @@ def get_job_or_404(job_id: UUID, user: User, db: Session) -> Job:
 
 @app.get("/api/v1/jobs/export")
 def export_jobs(user: User = Depends(get_authenticated_user), db: Session = Depends(get_db)) -> Response:
-    rows = db.scalars(job_query_for_user(user).order_by(Job.submitted_at.desc()).limit(5000)).unique().all()
+    execution_time = func.coalesce(Job.started_at, Job.submitted_at)
+    rows = db.scalars(
+        job_query_for_user(user)
+        .order_by(execution_time.desc(), Job.submitted_at.desc(), Job.id.desc())
+        .limit(5000)
+    ).unique().all()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["job_id", "automation", "server", "requested_by", "status", "submitted_at", "completed_at", "change_number", "business_reason"])
+    writer.writerow(["job_id", "automation", "server", "requested_by", "status", "execution_time", "completed_at", "change_number", "business_reason"])
     for row in rows:
         values = [
             str(row.id), row.automation.name, row.server.display_name, row.requester.full_name,
-            row.status, row.submitted_at.isoformat(), row.completed_at.isoformat() if row.completed_at else "",
+            row.status, (row.started_at or row.submitted_at).isoformat(), row.completed_at.isoformat() if row.completed_at else "",
             row.change_number or "", row.business_reason,
         ]
         writer.writerow([("'" if str(value).startswith(("=", "+", "-", "@", "\t", "\r")) else "") + sanitize_text(value) for value in values])

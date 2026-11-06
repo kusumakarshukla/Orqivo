@@ -1,6 +1,6 @@
 # Database
 
-PostgreSQL is the system of record. SQLAlchemy 2.x models and Alembic migrations are in `backend/`; the Replit preview uses the shared PostgreSQL database through Drizzle.
+PostgreSQL is the system of record. SQLAlchemy 2.x models and Alembic migrations in `backend/` are used by the application runtime. The workspace also contains a separate Drizzle package.
 
 ## Tables
 

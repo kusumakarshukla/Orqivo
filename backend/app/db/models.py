@@ -160,6 +160,55 @@ class JobEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
+class AccountStateRequest(Base):
+    __tablename__ = "account_state_requests"
+    __table_args__ = (
+        Index("account_state_requests_submitted_idx", "submitted_at"),
+        Index("account_state_requests_requester_idx", "requested_by_user_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    action: Mapped[str] = mapped_column(String(40), nullable=False)
+    sam_account_name: Mapped[str] = mapped_column(String(20), nullable=False)
+    requested_by_user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    job_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="SET NULL"),
+        unique=True,
+    )
+    status: Mapped[str] = mapped_column(String(40), default="awaiting_automation_integration", nullable=False)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class CatalogueRequest(Base):
+    __tablename__ = "catalogue_requests"
+    __table_args__ = (
+        Index("catalogue_requests_submitted_idx", "submitted_at"),
+        Index("catalogue_requests_requester_idx", "requested_by_user_id"),
+        Index("catalogue_requests_catalogue_idx", "catalogue"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    catalogue: Mapped[str] = mapped_column(String(60), nullable=False)
+    request_data: Mapped[dict] = mapped_column(JSON, nullable=False)
+    requested_by_user_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    job_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("jobs.id", ondelete="SET NULL"),
+        unique=True,
+    )
+    status: Mapped[str] = mapped_column(String(40), default="submitted_for_review", nullable=False)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     __table_args__ = (

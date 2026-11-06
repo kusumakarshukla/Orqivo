@@ -1,6 +1,6 @@
 # Deployment
 
-Real Ansible execution must run on the Linux automation host that can route to the registered Windows targets. Replit is for development and mock execution only.
+Real Ansible execution must run on the Linux automation host that can route to the registered Windows targets. Local development should use mock execution only.
 
 ## Host installation
 
@@ -21,6 +21,12 @@ PORT=5173 BASE_PATH=/ pnpm --filter @workspace/windows-automation-portal run bui
 ```
 
 Serve `artifacts/windows-automation-portal/dist/public` with Nginx. Configure `/api/` to proxy to the FastAPI service on loopback port 8000. Set `FRONTEND_URL` to the exact HTTPS origin.
+
+### Optional Azure Entra ID SSO
+
+SSO is enabled only when all `AZURE_SSO_*` values in `.env.example` are configured. Register a single-tenant Web application in Entra ID and set its exact redirect URI to `https://<portal-host>/api/v1/auth/sso/callback`. Configure group claims for the three security groups and set each `AZURE_SSO_{ADMIN,OPERATOR,VIEWER}_GROUP_ID` to that group's object ID. Store the client secret only in the protected environment/secret manager. The SSO button appears automatically when configuration is complete; normal email/password login remains available. Users in multiple mapped groups receive the highest role (admin, then operator, then viewer); users outside those groups are denied. Group overage is rejected, so keep the SSO groups within Entra's ID-token group-claim limit or use an app registration whose assignment only emits the three relevant groups.
+
+Set `AZURE_SSO_REDIRECT_URI` to the same exact HTTPS callback URI in every deployment and in the Entra app registration. No tenant-specific URLs or group IDs are hard-coded in the application.
 
 Run API and worker separately:
 
@@ -50,6 +56,15 @@ docker compose ps
 ```
 
 The frontend is exposed on `WEB_PORT` (default 8080). Put a TLS-terminating reverse proxy or load balancer in front of it. Back up the Postgres volume before updates.
+
+For incremental local development instead of the production Nginx frontend, build the dev images when first setting up or when dependency definitions change, then start with the repository script:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml build api worker frontend
+./startup.sh
+```
+
+The dev overlay serves frontend source with Vite HMR and bind-mounts backend and Ansible files. Routine startup uses `--no-build`; JS, playbook, and Ansible config edits are visible without rebuilding. API code changes reload automatically; restart the worker service to load worker code changes, without rebuilding its image. The first switch from production services recreates only API, worker, and frontend containers to apply the mounts; PostgreSQL and its volume are preserved. Do not use the dev overlay for production deployment.
 
 ## Upgrade and rollback
 

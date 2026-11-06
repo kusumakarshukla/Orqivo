@@ -1,1 +1,1 @@
-"""Windows Automation Portal API and worker."""
+"""Orqivo API and worker."""

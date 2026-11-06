@@ -3,7 +3,7 @@
 ## Component responsibilities
 
 - **React/Vite portal**: login, approved automation catalogue, validated submission forms, job tracking, history, server administration, and audit visibility.
-- **Replit preview API**: Express/TypeScript adapter using the workspace's shared Drizzle/PostgreSQL service. It runs with `MOCK_MODE=true` and persists the complete mock workflow.
+- **FastAPI**: Python 3.12 API using SQLAlchemy and Alembic. It validates requests, enforces roles, writes audit and job events, and places work in PostgreSQL.
 - **Linux production API**: FastAPI/Python 3.12 with SQLAlchemy and Alembic. The API validates requests, enforces roles, writes audit and job events, and places work in PostgreSQL.
 - **Linux worker**: separate Python process that atomically claims pending jobs and invokes only registry-approved Ansible playbooks.
 - **Ansible**: connects from the Linux automation host to one registered Windows server through WinRM HTTPS on port 5986.
@@ -47,9 +47,9 @@ erDiagram
 
 ## Mock mode versus production mode
 
-`MOCK_MODE=true` is the Replit/local default. It does not call `ansible-playbook`, does not contact a Windows host, and runs a 2–8 second simulation with events, success/failure/timeout outcomes, database history, and a visible mock indicator.
+`MOCK_MODE=true` is the local development default. It does not call `ansible-playbook`, does not contact a Windows host, and runs a 2–8 second simulation with events, success/failure/timeout outcomes, database history, and a visible mock indicator.
 
-`MOCK_MODE=false` is for the Linux automation host only. It also requires `ANSIBLE_ENABLED=true`, `WINDOWS_USERNAME`, `WINDOWS_PASSWORD`, a configured Ansible working directory, and a Windows host reachable over HTTPS/5986. Missing production configuration fails safely. Real WinRM connectivity has not been tested from Replit; it must be verified from the Linux host.
+`MOCK_MODE=false` is for the Linux automation host only. It also requires `ANSIBLE_ENABLED=true`, `WINDOWS_USERNAME`, `WINDOWS_PASSWORD`, a configured Ansible working directory, and a Windows host reachable over HTTPS/5986. Missing production configuration fails safely. Real WinRM connectivity must be verified from the Linux host.
 
 ## Why the browser never talks directly to Windows
 

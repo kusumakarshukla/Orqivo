@@ -45,7 +45,7 @@ docs/                                 Architecture, security, operations, and us
 
 ## 6. Development accounts
 
-Keep `MOCK_MODE=true` for local development. Configure `DEV_ADMIN_PASSWORD`, `DEV_OPERATOR_PASSWORD`, and `DEV_VIEWER_PASSWORD` in the protected local environment before seeding development accounts. The API stores only password hashes; no default passwords are provided.
+Keep `MOCK_MODE=true` for local development. Configure `DEV_ADMIN_PASSWORD`, `DEV_OPERATOR_PASSWORD`, and `DEV_VIEWER_PASSWORD` in a protected local environment before seeding accounts. No usable passwords are supplied by defaults or `.env.example`; unconfigured accounts are created without a usable password. Production requires an explicit admin password of at least 14 characters. Passwords are stored only as hashes.
 
 Use the login page account buttons to select an email, enter its configured password, and sign in. Demo emails are `admin@example.com`, `operator@example.com`, and `viewer@example.com`. Azure Entra ID SSO can be enabled separately with deployment environment variables; the Microsoft button appears automatically when configured. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#optional-azure-entra-id-sso).
 
@@ -80,7 +80,7 @@ The local Vite server proxies `/api` requests to `http://127.0.0.1:8000`, where 
 
 Create a database and least-privilege application account. Set `DATABASE_URL` in a protected environment; never hardcode credentials.
 
-For the Python backend, apply migrations and seed data:
+For the Python backend, apply migrations and seed data. Set required account passwords in the protected environment first; production seeding fails if `DEV_ADMIN_PASSWORD` is missing or weak:
 
 ```bash
 make migrate
@@ -113,7 +113,7 @@ Copy `powershell/Restart-WindowsService.ps1`, `powershell/Get-ServerHealth.ps1`,
 
 See [.env.example](.env.example). Important values include `DATABASE_URL`, `SESSION_SECRET`, `CSRF_SECRET`, `MOCK_MODE`, `ANSIBLE_ENABLED`, `ANSIBLE_BINARY`, `ANSIBLE_CONFIG`, `ANSIBLE_WORKING_DIRECTORY`, `WINDOWS_USERNAME`, `WINDOWS_PASSWORD`, `WINDOWS_WINRM_TRANSPORT`, the three `DEV_*_PASSWORD` values, and the optional `AZURE_SSO_*` values.
 
-Never commit `.env`. Use a protected local environment file for development and an approved secret manager or protected environment file for production. Production must fail closed if session/CSRF secrets or Windows credentials are missing.
+Never commit `.env`. Use a protected local environment file for development and an approved secret manager or protected environment file for production. Production fails closed if session/CSRF secrets or the admin password are missing, weak, or do not match the stored seeded admin. Run the production seed after setting the admin password; it synchronizes built-in user password hashes to configured values and disables password login for built-in accounts whose password is not configured. To reset an existing account without putting the password in shell history, run `python -m app.reset_password` from the backend environment, or in Docker run `sudo docker compose run --rm -it api python -m app.reset_password`; enter the account email and new password at the hidden prompts. For the seeded production admin, the entered password must match `DEV_ADMIN_PASSWORD`. Use at least 14 characters and do not send passwords in chat or tickets.
 
 ## 13. Database migrations
 

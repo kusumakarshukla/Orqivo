@@ -22,7 +22,7 @@ from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.ansible_runner import PLAYBOOK_REGISTRY, SCRIPT_REGISTRY, connection_test_automation, execute_playbook
-from app.core.config import settings
+from app.core.config import settings, validate_production_admin_password
 from app.core.security import (
     digest_token,
     hash_password,
@@ -514,6 +514,15 @@ def role_dependency(*roles: str):
 async def lifespan(_: FastAPI):
     if settings.app_env == "production" and (not settings.session_secret or not settings.csrf_secret):
         raise RuntimeError("SESSION_SECRET and CSRF_SECRET must be configured in production.")
+    if settings.app_env == "production":
+        validate_production_admin_password(settings.dev_admin_password)
+        with SessionLocal() as db:
+            admin = db.scalar(select(User).where(User.email == "admin@example.com"))
+            if admin is None or not verify_password(settings.dev_admin_password, admin.password_hash):
+                raise RuntimeError(
+                    "The stored seeded admin password does not match DEV_ADMIN_PASSWORD. "
+                    "Run the production seed or reset the admin password to the configured value."
+                )
     logger.info("API starting", extra={"mock_mode": settings.mock_mode})
     yield
     logger.info("API stopping")

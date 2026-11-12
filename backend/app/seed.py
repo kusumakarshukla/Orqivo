@@ -1,6 +1,6 @@
 from sqlalchemy import select
 
-from app.core.config import settings
+from app.core.config import settings, validate_production_admin_password
 from app.core.security import hash_password
 from app.db.models import AutomationDefinition, Role, Server, User
 from app.db.session import SessionLocal
@@ -86,6 +86,9 @@ AUTOMATIONS = [
 
 
 def seed() -> None:
+    if settings.app_env == "production":
+        validate_production_admin_password(settings.dev_admin_password)
+
     with SessionLocal.begin() as db:
         roles = {role.name: role for role in db.scalars(select(Role)).all()}
         for name, description, permissions in ROLE_DATA:
@@ -105,6 +108,8 @@ def seed() -> None:
                     password_hash=hash_password(password) if password else "password-not-configured",
                 )
                 db.add(users[email])
+            elif settings.app_env == "production":
+                users[email].password_hash = hash_password(password) if password else "password-not-configured"
             elif password and users[email].password_hash == "password-not-configured":
                 users[email].password_hash = hash_password(password)
 

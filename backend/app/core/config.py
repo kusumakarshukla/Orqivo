@@ -32,9 +32,9 @@ class Settings(BaseSettings):
     ad_demo_ou_dn: str | None = None
     log_level: str = "INFO"
     enable_api_docs: bool = True
-    dev_admin_password: str = "admin"
-    dev_operator_password: str = "operator"
-    dev_viewer_password: str = "viewer"
+    dev_admin_password: str | None = None
+    dev_operator_password: str | None = None
+    dev_viewer_password: str | None = None
     azure_sso_tenant_id: str | None = None
     azure_sso_client_id: str | None = None
     azure_sso_client_secret: str | None = None
@@ -69,3 +69,16 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def validate_production_admin_password(password: str | None) -> None:
+    if (
+        password is None
+        or not password.strip()
+        or len(password) < 14
+        or password.casefold() in {"admin", "operator", "viewer", "password", "changeme"}
+    ):
+        raise RuntimeError(
+            "Production requires DEV_ADMIN_PASSWORD to be explicitly configured "
+            "with at least 14 characters and not a known placeholder."
+        )

@@ -12,6 +12,8 @@ sudo install -d -o windows-automation -g windows-automation /opt/windows-automat
 
 Deploy the project to `/opt/windows-automation`, then run `bash scripts/setup_linux.sh`. Create `/etc/windows-automation.env` with `root:windows-automation` ownership and mode `0640`. Set production secrets outside Git. Run migrations explicitly with `scripts/initialize_database.sh`.
 
+Set `DEV_ADMIN_PASSWORD` in the protected production environment before starting the API or running the seed. It must be at least 14 characters; production startup and seeding fail if it is missing or a known placeholder. Production seeding synchronizes built-in user hashes with configured values and disables password login for built-in accounts without a configured password. After a password change, rerun the production seed or set the seeded admin to the same value configured as `DEV_ADMIN_PASSWORD`; startup verifies that these values match. The sample `.env.example` contains no usable passwords or secret values. For Compose deployments, update an existing account interactively with `sudo docker compose run --rm -it api python -m app.reset_password`; do not pass passwords as command-line arguments.
+
 ## Frontend and API
 
 Build the UI from the monorepo:

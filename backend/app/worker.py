@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-import random
+import secrets
 import signal
 from datetime import datetime, timezone
 from typing import Any
@@ -31,6 +31,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("windows_automation.worker")
 STOP = asyncio.Event()
+
+
+def sanitize_log_value(value: object) -> str:
+    return "".join(char if char >= " " and char != "\x7f" else " " for char in str(value or ""))
 
 
 def add_event(db, job_id: UUID, event_type: str, message: str, details: dict[str, Any] | None = None) -> None:
@@ -131,7 +135,7 @@ async def execute_job(job_id: UUID) -> None:
             is_simulation = settings.mock_mode
 
         if is_simulation:
-            duration_ms = random.randint(2000, 8000)
+            duration_ms = 2000 + secrets.randbelow(6001)
             stages = [
                 (0.15, "validated", "Request validated against the approved parameter schema"),
                 (0.38, "connected", "Mock WinRM HTTPS connection established"),
@@ -144,8 +148,12 @@ async def execute_job(job_id: UUID) -> None:
                 with SessionLocal.begin() as db:
                     add_event(db, job_id, event_type, message, {"mock": True})
             await asyncio.sleep(max(0, (1 - last) * duration_ms / 1000))
-            timed_out = random.random() < max(0.0, min(1.0, settings.mock_timeout_rate))
-            failed = job.simulate_failure or random.random() < max(0.0, min(1.0, settings.mock_failure_rate))
+            timed_out = secrets.randbelow(1_000_000) < int(
+                max(0.0, min(1.0, settings.mock_timeout_rate)) * 1_000_000
+            )
+            failed = job.simulate_failure or secrets.randbelow(1_000_000) < int(
+                max(0.0, min(1.0, settings.mock_failure_rate)) * 1_000_000
+            )
             status = "timed_out" if timed_out else "failed" if failed else "successful"
             stdout = "[MOCK RESULT]\n" + mock_result(automation, server, parameters)
             stderr = (
@@ -220,7 +228,11 @@ async def execute_job(job_id: UUID) -> None:
             )
     except Exception as exc:  # noqa: BLE001 - worker must persist a safe failed result.
         message = sanitize_text(str(exc))
-        logger.error("Job execution failed: %s", message, extra={"job_id": str(job_id)})
+        logger.error(
+            "Job execution failed: %s",
+            sanitize_log_value(message),
+            extra={"job_id": str(job_id)},
+        )
         with SessionLocal.begin() as db:
             job = db.get(Job, job_id)
             if job is not None:
@@ -261,7 +273,10 @@ async def run_worker() -> None:
                 active.add(task)
             await asyncio.sleep(1)
         except Exception as exc:
-            logger.error("Worker polling failed: %s", sanitize_text(exc))
+            logger.error(
+                "Worker polling failed: %s",
+                sanitize_log_value(sanitize_text(exc)),
+            )
             await asyncio.sleep(3)
     if active:
         await asyncio.gather(*active, return_exceptions=True)

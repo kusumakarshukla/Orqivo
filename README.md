@@ -314,8 +314,7 @@ Add the definition to `AUTOMATIONS` in `backend/app/seed.py`, then:
      -i ansible/inventory/development.yml \
      ansible/playbooks/create_ad_group.yml
    docker compose -f docker-compose.yml -f docker-compose.dev.yml run --rm api python -m app.seed
-   docker compose -f docker-compose.yml -f docker-compose.dev.yml restart worker
-   pnpm --filter @workspace/windows-automation-portal run typecheck
+vi    pnpm --filter @workspace/windows-automation-portal run typecheck
    ```
 
 5. In the PowerShell script, set `$Ansible.Result` to a safe structured result (for example, success, group name, and distinguished name, but no credentials), and use `Write-Host` for user-facing status messages. In the playbook, register the `win_powershell` task with `no_log: true`. To show only those PowerShell messages in job stdout, forward `host_out` through the marker and add the automation key to the runner's output-extraction set; keep the result assertion independent from display text.

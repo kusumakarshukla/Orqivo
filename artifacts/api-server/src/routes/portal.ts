@@ -6,7 +6,13 @@ import {
   type NextFunction,
 } from "express";
 import cookieParser from "cookie-parser";
-import { randomBytes, createHmac, timingSafeEqual, scrypt } from "node:crypto";
+import {
+  randomBytes,
+  randomInt,
+  createHmac,
+  timingSafeEqual,
+  scrypt,
+} from "node:crypto";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { mkdtemp, chmod, writeFile, rm } from "node:fs/promises";
@@ -44,10 +50,19 @@ import {
 const router: IRouter = Router();
 const SESSION_COOKIE = "wap_session";
 const CSRF_COOKIE = "wap_csrf";
-const sessionSecret =
-  process.env.SESSION_SECRET || randomBytes(48).toString("hex");
 const mockMode = process.env.MOCK_MODE !== "false";
 const isProduction = process.env.APP_ENV === "production";
+const configuredSessionSecret = process.env.SESSION_SECRET;
+if (
+  isProduction &&
+  (!configuredSessionSecret || configuredSessionSecret.length < 32)
+) {
+  throw new Error("Production requires a configured SESSION_SECRET of at least 32 characters.");
+}
+const sessionSecret =
+  configuredSessionSecret || randomBytes(48).toString("hex");
+const DISABLED_PASSWORD_HASH = "!disabled!";
+const MIN_PRODUCTION_ADMIN_PASSWORD_LENGTH = 14;
 const execFileAsync = promisify(execFile);
 const failedLoginAttempts = new Map<
   string,
@@ -182,7 +197,10 @@ function rejectCrossSite(
 router.use(cookieParser());
 router.use((req, res, next) => {
   const correlationId = String(req.id || randomBytes(12).toString("hex"));
-  res.setHeader("X-Correlation-ID", correlationId);
+  const safeCorrelationId = /^[A-Za-z0-9._-]{1,128}$/.test(correlationId)
+    ? correlationId
+    : randomBytes(16).toString("hex");
+  res.setHeader("X-Correlation-ID", safeCorrelationId);
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "same-origin");
@@ -222,6 +240,20 @@ let seedPromise: Promise<void> | undefined;
 async function ensureSeeded(): Promise<void> {
   if (seedPromise) return seedPromise;
   seedPromise = (async () => {
+    if (isProduction) {
+      const adminPassword = process.env.DEV_ADMIN_PASSWORD;
+      if (
+        !adminPassword ||
+        adminPassword.trim().length < MIN_PRODUCTION_ADMIN_PASSWORD_LENGTH ||
+        ["admin", "operator", "viewer", "password", "changeme"].includes(
+          adminPassword.toLowerCase(),
+        )
+      ) {
+        throw new Error(
+          "Production requires DEV_ADMIN_PASSWORD with at least 14 characters and no known placeholder.",
+        );
+      }
+    }
     const roles = [
       {
         name: "admin",
@@ -275,9 +307,6 @@ async function ensureSeeded(): Promise<void> {
     ];
     for (const [email, fullName, role, password] of userSeeds) {
       const existingPassword = existing.get(email);
-      const hasLegacyDefault = existingPassword
-        ? await passwordMatches("admin", existingPassword)
-        : false;
       if (!existing.has(email) && roleIds.has(role)) {
         await db
           .insert(usersTable)
@@ -287,22 +316,28 @@ async function ensureSeeded(): Promise<void> {
             roleId: roleIds.get(role)!,
             passwordHash: password
               ? await passwordHash(password)
-              : "password-not-configured",
+              : DISABLED_PASSWORD_HASH,
             isActive: true,
           })
           .onConflictDoNothing();
+      } else if (isProduction && existing.has(email)) {
+        await db
+          .update(usersTable)
+          .set({
+            passwordHash: password
+              ? await passwordHash(password)
+              : DISABLED_PASSWORD_HASH,
+            updatedAt: now(),
+          })
+          .where(eq(usersTable.email, email));
       } else if (
         password &&
-        (existingPassword === "password-not-configured" || hasLegacyDefault)
+        existingPassword &&
+        !existingPassword.startsWith("scrypt$")
       ) {
         await db
           .update(usersTable)
           .set({ passwordHash: await passwordHash(password), updatedAt: now() })
-          .where(eq(usersTable.email, email));
-      } else if (role === "admin" && !password && hasLegacyDefault) {
-        await db
-          .update(usersTable)
-          .set({ passwordHash: "password-not-configured", updatedAt: now() })
           .where(eq(usersTable.email, email));
       }
     }
@@ -316,7 +351,7 @@ async function ensureSeeded(): Promise<void> {
         winrmPort: 5986,
         useHttps: true,
         certificateValidation: "validate",
-        credentialReference: "WINDOWS_PASSWORD",
+        credentialReference: "windows-automation-host",
         isActive: true,
       },
       {
@@ -328,7 +363,7 @@ async function ensureSeeded(): Promise<void> {
         winrmPort: 5986,
         useHttps: true,
         certificateValidation: "validate",
-        credentialReference: "WINDOWS_PASSWORD",
+        credentialReference: "windows-automation-host",
         isActive: true,
       },
     ];
@@ -868,7 +903,7 @@ async function processJob(jobId: string): Promise<void> {
       return;
     }
     if (mockMode) {
-      const totalMs = 2000 + Math.floor(Math.random() * 6000);
+      const totalMs = 2000 + randomInt(6000);
       const stages = [
         {
           progress: 0.18,
@@ -902,8 +937,10 @@ async function processJob(jobId: string): Promise<void> {
         1,
         Math.max(0, Number(process.env.MOCK_TIMEOUT_RATE || 0)),
       );
-      const timedOut = Math.random() < timeoutRate;
-      const failed = row.simulateFailure || Math.random() < failureRate;
+      const timedOut = randomInt(1_000_000) / 1_000_000 < timeoutRate;
+      const failed =
+        row.simulateFailure ||
+        randomInt(1_000_000) / 1_000_000 < failureRate;
       const status = timedOut ? "timed_out" : failed ? "failed" : "successful";
       const resultText =
         automation.code === "get_disk_space"

@@ -229,7 +229,6 @@ def _sign_sso_flow(flow: dict[str, Any]) -> str:
     signature = hmac.new(settings.csrf_secret.encode(), encoded.encode(), hashlib.sha256).hexdigest()
     return f"{encoded}.{signature}"
 
-
 def _read_sso_flow(cookie: str) -> dict[str, Any]:
     try:
         encoded, signature = cookie.rsplit(".", 1)

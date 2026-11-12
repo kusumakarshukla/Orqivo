@@ -6,6 +6,7 @@ import secrets
 from app.core.config import settings
 
 SECRET_FIELD = re.compile(r"password|secret|token|credential|authorization|(?:^|_)key(?:$|_)", re.I)
+DISABLED_PASSWORD_HASH = "!disabled!"
 
 
 def hash_password(password: str) -> str:

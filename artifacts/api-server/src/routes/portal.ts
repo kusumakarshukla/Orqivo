@@ -646,10 +646,10 @@ async function jobResponse(
   ]);
   const events = includeEvents
     ? await db
-        .select()
-        .from(jobEventsTable)
-        .where(eq(jobEventsTable.jobId, row.id))
-        .orderBy(asc(jobEventsTable.createdAt))
+      .select()
+      .from(jobEventsTable)
+      .where(eq(jobEventsTable.jobId, row.id))
+      .orderBy(asc(jobEventsTable.createdAt))
     : [];
   return {
     id: row.id,
@@ -945,45 +945,45 @@ async function processJob(jobId: string): Promise<void> {
       const resultText =
         automation.code === "get_disk_space"
           ? JSON.stringify(
+            {
+              drives: [
+                {
+                  drive: "C:",
+                  total_gb: 240,
+                  used_gb: 128.4,
+                  free_gb: 111.6,
+                  free_percent: 46.5,
+                },
+              ],
+            },
+            null,
+            2,
+          )
+          : automation.code === "get_server_health"
+            ? JSON.stringify(
               {
-                drives: [
-                  {
-                    drive: "C:",
-                    total_gb: 240,
-                    used_gb: 128.4,
-                    free_gb: 111.6,
-                    free_percent: 46.5,
-                  },
-                ],
+                hostname: server.name,
+                operating_system: server.operatingSystem,
+                uptime_hours: 183.2,
+                cpu_percent: 18.4,
+                memory_percent: 62.1,
+                services_healthy: 6,
               },
               null,
               2,
             )
-          : automation.code === "get_server_health"
-            ? JSON.stringify(
-                {
-                  hostname: server.name,
-                  operating_system: server.operatingSystem,
-                  uptime_hours: 183.2,
-                  cpu_percent: 18.4,
-                  memory_percent: 62.1,
-                  services_healthy: 6,
-                },
-                null,
-                2,
-              )
             : JSON.stringify(
-                {
-                  service:
-                    (row.parametersJson as Record<string, unknown>)
-                      .service_name ?? "Spooler",
-                  before: "Running",
-                  after: "Running",
-                  action: "Restarted",
-                },
-                null,
-                2,
-              );
+              {
+                service:
+                  (row.parametersJson as Record<string, unknown>)
+                    .service_name ?? "Spooler",
+                before: "Running",
+                after: "Running",
+                action: "Restarted",
+              },
+              null,
+              2,
+            );
       const stderr = timedOut
         ? "Job exceeded the configured execution timeout (simulated)."
         : failed
@@ -1387,7 +1387,7 @@ router.post(
     if (
       !PLAYBOOK_REGISTRY[input.playbook_key] ||
       SCRIPT_REGISTRY[input.powershell_script_key] !==
-        SCRIPT_REGISTRY[input.playbook_key]
+      SCRIPT_REGISTRY[input.playbook_key]
     ) {
       res
         .status(400)
@@ -1439,7 +1439,7 @@ router.put(
     if (
       !PLAYBOOK_REGISTRY[input.playbook_key] ||
       SCRIPT_REGISTRY[input.powershell_script_key] !==
-        SCRIPT_REGISTRY[input.playbook_key]
+      SCRIPT_REGISTRY[input.playbook_key]
     ) {
       res
         .status(400)
@@ -1809,27 +1809,27 @@ router.get(
         ilike(jobsTable.businessReason, `%${filters.search}%`),
         ...(matchingAutomations.length
           ? [
-              sql`${jobsTable.automationDefinitionId} in (${sql.join(
-                matchingAutomations.map((row) => sql`${row.id}`),
-                sql`, `,
-              )})`,
-            ]
+            sql`${jobsTable.automationDefinitionId} in (${sql.join(
+              matchingAutomations.map((row) => sql`${row.id}`),
+              sql`, `,
+            )})`,
+          ]
           : []),
         ...(matchingServers.length
           ? [
-              sql`${jobsTable.serverId} in (${sql.join(
-                matchingServers.map((row) => sql`${row.id}`),
-                sql`, `,
-              )})`,
-            ]
+            sql`${jobsTable.serverId} in (${sql.join(
+              matchingServers.map((row) => sql`${row.id}`),
+              sql`, `,
+            )})`,
+          ]
           : []),
         ...(matchingUsers.length
           ? [
-              sql`${jobsTable.requestedByUserId} in (${sql.join(
-                matchingUsers.map((row) => sql`${row.id}`),
-                sql`, `,
-              )})`,
-            ]
+            sql`${jobsTable.requestedByUserId} in (${sql.join(
+              matchingUsers.map((row) => sql`${row.id}`),
+              sql`, `,
+            )})`,
+          ]
           : []),
       ];
       conditions.push(or(...searchConditions)!);
@@ -1897,7 +1897,7 @@ router.post(
       !automation.isActive ||
       !PLAYBOOK_REGISTRY[automation.playbookKey] ||
       SCRIPT_REGISTRY[automation.powershellScriptKey] !==
-        SCRIPT_REGISTRY[automation.playbookKey]
+      SCRIPT_REGISTRY[automation.playbookKey]
     ) {
       res
         .status(400)
@@ -2234,11 +2234,11 @@ router.get(
     const filters = parsed.data;
     const conditions = filters.search
       ? [
-          or(
-            ilike(auditLogsTable.action, `%${filters.search}%`),
-            ilike(auditLogsTable.resourceType, `%${filters.search}%`),
-          )!,
-        ]
+        or(
+          ilike(auditLogsTable.action, `%${filters.search}%`),
+          ilike(auditLogsTable.resourceType, `%${filters.search}%`),
+        )!,
+      ]
       : [];
     const whereClause = conditions.length ? and(...conditions) : undefined;
     const [countRow] = await db
@@ -2258,10 +2258,10 @@ router.get(
       rows.map(async (row) => {
         const [user] = row.userId
           ? await db
-              .select()
-              .from(usersTable)
-              .where(eq(usersTable.id, row.userId))
-              .limit(1)
+            .select()
+            .from(usersTable)
+            .where(eq(usersTable.id, row.userId))
+            .limit(1)
           : [];
         return {
           id: row.id,

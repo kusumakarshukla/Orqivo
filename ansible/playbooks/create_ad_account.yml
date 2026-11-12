@@ -57,7 +57,7 @@
             Subcompany: "{{ subcompany | default('') }}"
 
       register: create_result
-      no_log: true
+      no_log: false
       timeout: 180
 
     - name: Print only PowerShell Write-Host output

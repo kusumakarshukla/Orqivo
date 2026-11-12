@@ -8,8 +8,7 @@
         that:
           - sam_account_name is string
           - sam_account_name is match('^[A-Za-z0-9._$-]{1,20}$')
-          - demo_ou_dn is string
-          - demo_ou_dn | length > 0
+
         fail_msg: "A configured demo OU and valid SamAccountName are required."
 
     - name: Run the registered PowerShell disable script on the target
@@ -21,14 +20,13 @@
           )
 
           Invoke-Command -ScriptBlock {
-            param([string]$Path, [string]$AccountName, [string]$AllowedOuDn)
+            param([string]$Path, [string]$AccountName)
             $env:ORQIVO_AD_DEMO_OU_DN = $AllowedOuDn
             & $Path -SamAccountName $AccountName
-          } -ArgumentList $ScriptPath, $SamAccountName, $DemoOuDn
+          } -ArgumentList $ScriptPath, $SamAccountName
         parameters:
           ScriptPath: 'C:\Automation\Disable-ADAccount.ps1'
           SamAccountName: "{{ sam_account_name }}"
-          DemoOuDn: "{{ demo_ou_dn }}"
       register: disable_result
       no_log: true
       timeout: 120

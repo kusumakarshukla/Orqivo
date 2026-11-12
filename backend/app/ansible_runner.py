@@ -148,6 +148,7 @@ def execute_playbook(
                                 "ansible_winrm_scheme": "https" if server.use_https else "http",
                                 "ansible_winrm_transport": transport,
                                 "ansible_user": "{{ lookup('env', 'WINDOWS_USERNAME') }}",
+                                # Ansible's required variable is resolved only from the protected process environment.
                                 "ansible_password": "{{ lookup('env', 'WINDOWS_PASSWORD') }}"
                             }
                         }

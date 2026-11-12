@@ -20,6 +20,11 @@ This file records the changes made to prepare Orqivo for security-team review.
 - `.env copy`: Removed the tracked environment copy containing credentials.
 - `README.md` and `docs/DEPLOYMENT.md`: Document explicit secret configuration and password recovery.
 - `SECURITY_REVIEW_README.md`: Added this requested change record and password recovery guidance.
+- `backend/app/main.py`: Accept only restricted request correlation IDs, otherwise generate one, preventing CR/LF log injection. JSON success, validation, and HTTP error responses now escape HTML-sensitive characters and Unicode line separators.
+- `backend/app/worker.py`: Use Python's cryptographically secure `secrets` generator for mock timing/failure simulation and strip control characters from exception messages before writing log lines.
+- `backend/app/core/security.py` and `backend/app/seed.py`: Use a non-password disabled-account marker instead of a password-like placeholder string.
+- `backend/app/ansible_runner.py`: Document that Ansible's `ansible_password` field receives its value at runtime from the protected process environment; no credential is embedded in the inventory template or source.
+- `artifacts/api-server/src/routes/portal.ts`: Require a configured production session secret and admin password, remove legacy default-password matching, sync production seed credentials from protected environment values, restrict response correlation IDs, and use cryptographic randomness for mock simulation. Credential-reference strings are labels, not secrets.
 
 ## Secure password setup and recovery
 
@@ -50,8 +55,12 @@ The removed tracked environment copy may remain in repository history, clones, a
 - Python syntax compilation passed for the changed backend modules.
 - Changed application modules imported successfully in a temporary environment with the backend runtime dependencies needed for those imports.
 - Focused admin-password policy checks passed for missing, short, known-placeholder, and long passphrase values.
+- Focused checks passed for HTML-sensitive JSON escaping, log control-character neutralization, and disabled-password hash rejection.
+- `pnpm --filter @workspace/api-server typecheck` passed.
 - `git diff --check` passed.
 - Installing every backend requirement on the local Python 3.14/macOS environment could not complete because the pinned cryptography range attempted a source build and OpenSSL development files were unavailable. This is a local validation-environment limitation; the deployment image uses Python 3.12.
 - No repository Python test files were present, and no production deployment or penetration test was run.
+
+The scanner's `ansible_password` / `WINDOWS_PASSWORD` matches are dataflow references to a protected environment variable, not committed password values. These names are required by Ansible and are deliberately retained; credential values are injected only into the process environment. The `credential_reference` values are labels only.
 
 Existing unrelated working-tree modifications to the Ansible account playbooks were not changed as part of this review.
